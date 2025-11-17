@@ -4,13 +4,47 @@ import { AppProvider, useAppContext } from "./context/AppContext";
 import Header from "./components/Header";
 import ChatPage from "./pages/ChatPage";
 import DashboardPage from "./pages/DashboardPage";
+import SignInPage from "./pages/SignInPage";
+import SignUpPage from "./pages/SignUpPage";
 
 const AppShell: React.FC = () => {
   const { theme } = useAppContext();
-  const [activeTab, setActiveTab] = useState<"chat" | "dashboard">(
-    "chat",
-  );
 
+  // NEW: simple auth state
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+  if (typeof window === "undefined") return false;
+  return !!localStorage.getItem("user");
+  });
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+
+  const [activeTab, setActiveTab] = useState<"chat" | "dashboard">("chat");
+
+  // 🔐 If user is NOT logged in, show auth screens instead of dashboard/chat
+  if (!isAuthenticated) {
+    if (authMode === "signin") {
+      return (
+       <SignInPage
+        onSwitchToSignUp={() => setAuthMode("signup")}
+        onSignedIn={() => {
+          setIsAuthenticated(true);
+          setActiveTab("dashboard");  // 👈 redirect to dashboard
+        }}
+      />
+      );
+    }
+
+    return (
+      <SignUpPage
+      onSwitchToSignIn={() => setAuthMode("signin")}
+      onSignedUp={() => {
+        setIsAuthenticated(true);
+        setActiveTab("dashboard");  // 👈 redirect to dashboard
+      }}
+    />
+    );
+  }
+
+  // ✅ After login/signup, show your existing UI
   return (
     <div
       className={`min-h-screen transition-colors duration-200 ${
@@ -50,11 +84,7 @@ const AppShell: React.FC = () => {
         </div>
 
         <div className="min-h-[600px]">
-          {activeTab === "chat" ? (
-            <ChatPage />
-          ) : (
-            <DashboardPage />
-          )}
+          {activeTab === "chat" ? <ChatPage /> : <DashboardPage />}
         </div>
       </div>
 
