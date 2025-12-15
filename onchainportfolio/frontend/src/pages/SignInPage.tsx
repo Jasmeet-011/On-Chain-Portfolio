@@ -1,16 +1,18 @@
+// src/pages/SignInPage.tsx - CONSISTENT BLUE THEME
 import React, { useState } from "react";
+import { api } from "../api";
+import { useAppContext } from "../context/AppContext";
 
 type SignInPageProps = {
   onSwitchToSignUp: () => void;
   onSignedIn: () => void;
 };
 
-const API_BASE_URL = "http://127.0.0.1:8000";
-
 const SignInPage: React.FC<SignInPageProps> = ({
   onSwitchToSignUp,
   onSignedIn,
 }) => {
+  const { setCurrentUser } = useAppContext();
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -36,67 +38,44 @@ const SignInPage: React.FC<SignInPageProps> = ({
 
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
+      const response = await api.login(formData.email, formData.password);
+      
+      localStorage.setItem("user", JSON.stringify({
+        id: response.user.id,
+        name: response.user.name,
+        email: response.user.email,
+        access_token: response.access_token,
+        token_type: response.token_type,
+      }));
+
+      setCurrentUser({
+        id: response.user.id,
+        name: response.user.name,
+        email: response.user.email,
       });
 
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        const message =
-          (data && (data.detail || data.message)) ||
-          "Failed to sign in. Please try again.";
-        setError(message);
-        return;
-      }
-
-      console.log("Signed in user:", data);
-      // store basic user info in localStorage
-			//localStorage.setItem("user", JSON.stringify(data));
       onSignedIn();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Signin error:", err);
-      setError("Something went wrong. Please try again.");
+      setError(err.message || "Failed to sign in. Please try again.");
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800 flex items-center justify-center p-6">
-      {/* Decorative gradient orbs */}
-      <div className="fixed top-0 left-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl -z-10" />
-      <div className="fixed bottom-0 right-0 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl -z-10" />
-
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
       <div className="w-full max-w-md">
-        <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl p-8 shadow-2xl">
-          {/* Header with Success Icon */}
-          <div className="flex items-center justify-between mb-8">
-            <h1 className="text-3xl font-bold text-white">Sign in</h1>
-            <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
-              <svg
-                className="w-7 h-7 text-white"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={3}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-            </div>
+        <div className="bg-slate-800 border border-slate-700 rounded-xl p-8 shadow-xl">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-bold text-white mb-2">Sign in</h1>
+            <p className="text-slate-400">Welcome back to ChainIQ</p>
           </div>
 
           {/* Error message */}
           {error && (
-            <div className="mb-4 rounded-xl bg-red-500/10 border border-red-500/60 px-4 py-3 text-sm text-red-200">
+            <div className="mb-4 rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
               {error}
             </div>
           )}
@@ -104,46 +83,23 @@ const SignInPage: React.FC<SignInPageProps> = ({
           <div className="space-y-5">
             {/* Email Input */}
             <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-300 mb-2"
-              >
+              <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-2">
                 Email
               </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all"
-                  placeholder="Enter your email"
-                />
-                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                  <svg
-                    className="w-5 h-5 text-gray-500"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-                    />
-                  </svg>
-                </div>
-              </div>
+              <input
+                type="email"
+                id="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Enter your email"
+              />
             </div>
 
             {/* Password Input */}
             <div>
-              <label
-                htmlFor="password"
-                className="block text-sm font-medium text-gray-300 mb-2"
-              >
+              <label htmlFor="password" className="block text-sm font-medium text-slate-300 mb-2">
                 Password
               </label>
               <div className="relative">
@@ -153,65 +109,33 @@ const SignInPage: React.FC<SignInPageProps> = ({
                   name="password"
                   value={formData.password}
                   onChange={handleChange}
-                  className="w-full px-4 py-3 bg-gray-700/50 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all pr-12"
+                  className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-12"
                   placeholder="Enter your password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-300"
                 >
                   {showPassword ? (
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
-                      />
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
                     </svg>
                   ) : (
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                      />
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                     </svg>
                   )}
                 </button>
               </div>
             </div>
 
-            {/* Forgot Password Link */}
-            <div className="flex justify-end">
-              <span className="text-sm text-blue-400 hover:text-blue-300 cursor-pointer transition-colors">
-                Forgot password?
-              </span>
-            </div>
-
             {/* Submit Button */}
             <button
               onClick={handleSubmit}
               disabled={isLoading}
-              className="w-full py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-semibold rounded-xl hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed mt-6"
+              className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors mt-6"
             >
               {isLoading ? (
                 <div className="flex items-center justify-center gap-2">
@@ -226,12 +150,12 @@ const SignInPage: React.FC<SignInPageProps> = ({
 
           {/* Sign Up Link */}
           <div className="mt-6 text-center">
-            <p className="text-gray-400 text-sm">
+            <p className="text-slate-400 text-sm">
               Don't have an account?{" "}
               <button
                 type="button"
                 onClick={onSwitchToSignUp}
-                className="text-blue-400 hover:text-blue-300 font-medium transition-colors cursor-pointer"
+                className="text-blue-400 hover:text-blue-300 font-medium"
               >
                 Sign Up
               </button>
@@ -239,13 +163,13 @@ const SignInPage: React.FC<SignInPageProps> = ({
           </div>
         </div>
 
-        {/* Logo at bottom */}
+        {/* Logo */}
         <div className="mt-8 flex justify-center items-center gap-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">A</span>
+          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold text-sm">C</span>
           </div>
-          <span className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-            AptosAI
+          <span className="text-xl font-bold text-white">
+            Chain<span className="text-blue-400">IQ</span>
           </span>
         </div>
       </div>

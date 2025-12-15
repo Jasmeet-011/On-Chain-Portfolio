@@ -1,141 +1,190 @@
+// src/pages/DashboardPage.tsx - PROFESSIONAL PRODUCTION UI
 import React, { useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../api";
 import SummaryCards from "../components/SummaryCards";
 import BalancesTable from "../components/BalancesTable";
-import NFTGallery from "../components/NFTGallery";
-import PositionsTable from "../components/PositionsTable";
+import TransactionsTable from "../components/TransactionsTable";
 
 const DashboardPage: React.FC = () => {
   const {
-    wallet,
+    activeWallet,
+    wallets,
     portfolioData,
     setPortfolioData,
-    manualAddress,
     theme,
   } = useAppContext();
+  
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const loadPortfolio = async () => {
-    const walletAddr =
-      wallet.connected && wallet.address
-        ? wallet.address
-        : manualAddress;
-    if (!walletAddr) return;
+    if (!activeWallet) return;
 
     setLoading(true);
+    setError(null);
+    
     try {
-      const response = await api.chat(
-        "get portfolio snapshot",
-        walletAddr,
-      );
-      setPortfolioData(response.data);
+      const portfolio = await api.getPortfolio(activeWallet.address);
+      
+      const balancesWithWallet = portfolio.balances.map((bal: any) => ({
+        ...bal,
+        wallet_name: activeWallet.label,
+        wallet_address: activeWallet.address,
+      }));
+      
+      setPortfolioData({
+        balances: balancesWithWallet,
+        total_usd_value: portfolio.total_usd_value || 0,
+        address: portfolio.address || activeWallet.address,
+        wallet_name: activeWallet.label,
+      });
+      
     } catch (error) {
       console.error("Failed to load portfolio:", error);
+      setError("Failed to load portfolio data");
     } finally {
       setLoading(false);
     }
   };
 
+  const loadTransactionsWithFilters = async (address: string, params: any) => {
+    return await api.getTransactionsFiltered(address, params);
+  };
+
   useEffect(() => {
-    if (
-      (wallet.connected && wallet.address) ||
-      manualAddress
-    ) {
+    if (activeWallet) {
       loadPortfolio();
+    } else {
+      setPortfolioData(null);
+      setError(null);
     }
-  }, [wallet.connected, wallet.address, manualAddress]);
+  }, [activeWallet?.address]);
 
-  if (!portfolioData && !loading) {
-    return (
-      <div
-        className={`rounded-2xl border backdrop-blur-sm p-16 text-center ${
-          theme === "dark"
-            ? "bg-gray-800/50 border-gray-700"
-            : "bg-white/50 border-gray-200"
-        }`}
-      >
-        <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl mb-6">
-          <span className="text-4xl">📊</span>
-        </div>
-        <h3
-          className={`text-2xl font-bold mb-3 ${
-            theme === "dark" ? "text-white" : "text-gray-900"
-          }`}
-        >
-          No Portfolio Data
-        </h3>
-        <p
-          className={`max-w-md mx-auto mb-6 ${
-            theme === "dark" ? "text-gray-400" : "text-gray-600"
-          }`}
-        >
-          Connect your wallet or enter a Testnet address in the
-          Chat tab to view your portfolio analytics
-        </p>
-      </div>
-    );
-  }
-
+  // Loading state
   if (loading) {
     return (
-      <div
-        className={`rounded-2xl border backdrop-blur-sm p-16 text-center ${
-          theme === "dark"
-            ? "bg-gray-800/50 border-gray-700"
-            : "bg-white/50 border-gray-200"
-        }`}
-      >
-        <div className="flex items-center justify-center gap-2">
-          <div
-            className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"
-            style={{ animationDelay: "0ms" }}
-          ></div>
-          <div
-            className="w-3 h-3 bg-purple-500 rounded-full animate-bounce"
-            style={{ animationDelay: "150ms" }}
-          ></div>
-          <div
-            className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"
-            style={{ animationDelay: "300ms" }}
-          ></div>
+      <div className={`rounded-xl p-12 text-center ${
+        theme === "dark" ? "bg-gray-800" : "bg-white border border-gray-200"
+      }`}>
+        <div className="flex justify-center mb-4">
+          <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
         </div>
-        <p
-          className={`mt-4 ${
-            theme === "dark" ? "text-gray-400" : "text-gray-600"
-          }`}
-        >
+        <p className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
           Loading portfolio...
         </p>
       </div>
     );
   }
 
+  // Error state
+  if (error) {
+    return (
+      <div className={`rounded-xl p-12 text-center ${
+        theme === "dark" ? "bg-gray-800" : "bg-white border border-gray-200"
+      }`}>
+        <div className="text-4xl mb-4">⚠️</div>
+        <h3 className={`text-xl font-bold mb-2 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+          Error Loading Portfolio
+        </h3>
+        <p className={`mb-6 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+          {error}
+        </p>
+        <button
+          onClick={loadPortfolio}
+          className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+        >
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  // No wallet connected
+  if (!activeWallet) {
+    return (
+      <div className={`rounded-xl p-16 text-center ${
+        theme === "dark" ? "bg-gray-800" : "bg-white border border-gray-200"
+      }`}>
+        <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-6 ${
+          theme === "dark" ? "bg-blue-500/10" : "bg-blue-50"
+        }`}>
+          <span className="text-3xl">💼</span>
+        </div>
+        <h3 className={`text-2xl font-bold mb-3 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+          Connect Your Wallet
+        </h3>
+        <p className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
+          Click "Connect Wallet" in the header to get started
+        </p>
+      </div>
+    );
+  }
+
+  // Empty portfolio
+  if (portfolioData && (!portfolioData.balances || portfolioData.balances.length === 0)) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className={`text-2xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+              Portfolio Dashboard
+            </h2>
+            <p className={`text-sm mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+              {activeWallet.label}
+            </p>
+          </div>
+          <button
+            onClick={loadPortfolio}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              theme === "dark"
+                ? "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                : "bg-white text-gray-700 hover:bg-gray-50 border border-gray-200"
+            }`}
+          >
+            🔄 Refresh
+          </button>
+        </div>
+
+        <div className={`rounded-xl p-16 text-center ${
+          theme === "dark" ? "bg-gray-800" : "bg-white border border-gray-200"
+        }`}>
+          <div className="text-4xl mb-4">💰</div>
+          <h3 className={`text-xl font-bold mb-2 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+            No Tokens Found
+          </h3>
+          <p className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
+            This wallet doesn't have any token balances yet
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Portfolio with data
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2
-            className={`text-3xl font-bold mb-1 ${
-              theme === "dark" ? "text-white" : "text-gray-900"
-            }`}
-          >
+          <h2 className={`text-2xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
             Portfolio Dashboard
           </h2>
-          <p
-            className={`text-sm ${
-              theme === "dark" ? "text-gray-400" : "text-gray-600"
-            }`}
-          >
-            Real-time overview of your on-chain assets
+          <p className={`text-sm mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+            <span className="font-medium text-blue-500">{activeWallet.label}</span>
+            {wallets.length > 1 && (
+              <span className="ml-2 text-gray-500">
+                ({wallets.length} wallet{wallets.length !== 1 ? "s" : ""} total)
+              </span>
+            )}
           </p>
         </div>
         <button
           onClick={loadPortfolio}
           disabled={loading}
-          className={`px-5 py-2.5 rounded-xl font-medium transition-all duration-200 ${
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             theme === "dark"
-              ? "bg-gray-800 text-gray-300 hover:bg-gray-700 border border-gray-700"
+              ? "bg-gray-800 text-gray-300 hover:bg-gray-700"
               : "bg-white text-gray-700 hover:bg-gray-50 border border-gray-200"
           } disabled:opacity-50`}
         >
@@ -143,111 +192,60 @@ const DashboardPage: React.FC = () => {
         </button>
       </div>
 
-      <SummaryCards data={portfolioData || {}} />
+      {/* Summary Cards */}
+      <SummaryCards data={portfolioData} />
 
-      {portfolioData?.balances &&
-        portfolioData.balances.length > 0 && (
-          <div
-            className={`rounded-2xl border backdrop-blur-sm ${
-              theme === "dark"
-                ? "bg-gray-800/50 border-gray-700"
-                : "bg-white/50 border-gray-200"
-            }`}
-          >
-            <div className="p-6">
-              <h3
-                className={`text-xl font-bold mb-1 ${
+      {/* Token Balances */}
+      {portfolioData?.balances && portfolioData.balances.length > 0 && (
+        <div className={`rounded-xl overflow-hidden ${
+          theme === "dark" ? "bg-gray-800" : "bg-white border border-gray-200"
+        }`}>
+          <div className="px-6 py-4 border-b border-gray-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                  Token Balances
+                </h3>
+                <p className={`text-sm mt-0.5 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                  Your holdings on Aptos
+                </p>
+              </div>
+              {wallets.length > 1 && (
+                <span className={`text-xs px-3 py-1.5 rounded-full font-medium ${
                   theme === "dark"
-                    ? "text-white"
-                    : "text-gray-900"
-                }`}
-              >
-                Token Balances
-              </h3>
-              <p
-                className={`text-sm mb-4 ${
-                  theme === "dark"
-                    ? "text-gray-400"
-                    : "text-gray-600"
-                }`}
-              >
-                Your token holdings across Aptos
-              </p>
-              <BalancesTable
-                balances={portfolioData.balances}
-                prices={portfolioData.prices}
-              />
+                    ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                    : "bg-blue-50 text-blue-600 border border-blue-200"
+                }`}>
+                  {activeWallet.label}
+                </span>
+              )}
             </div>
           </div>
-        )}
+          <BalancesTable balances={portfolioData.balances} />
+        </div>
+      )}
 
-      {portfolioData?.nfts &&
-        portfolioData.nfts.length > 0 && (
-          <div
-            className={`rounded-2xl border backdrop-blur-sm ${
-              theme === "dark"
-                ? "bg-gray-800/50 border-gray-700"
-                : "bg-white/50 border-gray-200"
-            }`}
-          >
-            <div className="p-6">
-              <h3
-                className={`text-xl font-bold mb-1 ${
-                  theme === "dark"
-                    ? "text-white"
-                    : "text-gray-900"
-                }`}
-              >
-                NFT Collection
-              </h3>
-              <p
-                className={`text-sm mb-4 ${
-                  theme === "dark"
-                    ? "text-gray-400"
-                    : "text-gray-600"
-                }`}
-              >
-                Digital collectibles in your wallet
-              </p>
-              <NFTGallery nfts={portfolioData.nfts} />
-            </div>
+      {/* Transaction History */}
+      {activeWallet && (
+        <div className={`rounded-xl overflow-hidden ${
+          theme === "dark" ? "bg-gray-800" : "bg-white border border-gray-200"
+        }`}>
+          <div className="px-6 py-4 border-b border-gray-700">
+            <h3 className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+              Transaction History
+            </h3>
+            <p className={`text-sm mt-0.5 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+              Recent activity for {activeWallet.label}
+            </p>
           </div>
-        )}
-
-      {portfolioData?.positions &&
-        portfolioData.positions.length > 0 && (
-          <div
-            className={`rounded-2xl border backdrop-blur-sm ${
-              theme === "dark"
-                ? "bg-gray-800/50 border-gray-700"
-                : "bg-white/50 border-gray-200"
-            }`}
-          >
-            <div className="p-6">
-              <h3
-                className={`text-xl font-bold mb-1 ${
-                  theme === "dark"
-                    ? "text-white"
-                    : "text-gray-900"
-                }`}
-              >
-                DeFi Positions
-              </h3>
-              <p
-                className={`text-sm mb-4 ${
-                  theme === "dark"
-                    ? "text-gray-400"
-                    : "text-gray-600"
-                }`}
-              >
-                Your lending and borrowing activities
-              </p>
-              <PositionsTable
-                positions={portfolioData.positions}
-              />
-            </div>
+          <div className="p-6">
+            <TransactionsTable 
+              address={activeWallet.address}
+              onLoadTransactions={loadTransactionsWithFilters}
+            />
           </div>
-        )}
+        </div>
+      )}
     </div>
   );
 };

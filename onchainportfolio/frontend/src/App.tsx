@@ -1,4 +1,4 @@
-// src/App.tsx
+// src/App.tsx - CONSISTENT COLOR THEME (Blue Only)
 import React, { useState } from "react";
 import { AppProvider, useAppContext } from "./context/AppContext";
 import Header from "./components/Header";
@@ -10,87 +10,93 @@ import SignUpPage from "./pages/SignUpPage";
 const AppShell: React.FC = () => {
   const { theme } = useAppContext();
 
-  // NEW: simple auth state
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-  if (typeof window === "undefined") return false;
-  return !!localStorage.getItem("user");
+    if (typeof window === "undefined") return false;
+    const user = localStorage.getItem("user");
+    return !!user;
   });
+
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "chat">("dashboard");
 
-  const [activeTab, setActiveTab] = useState<"chat" | "dashboard">("chat");
+  const handleLogout = () => {
+    localStorage.removeItem("user");
+    setIsAuthenticated(false);
+    setAuthMode("signin");
+  };
 
-  // 🔐 If user is NOT logged in, show auth screens instead of dashboard/chat
+  // Auth screens
   if (!isAuthenticated) {
     if (authMode === "signin") {
       return (
-       <SignInPage
-        onSwitchToSignUp={() => setAuthMode("signup")}
-        onSignedIn={() => {
-          setIsAuthenticated(true);
-          setActiveTab("dashboard");  // 👈 redirect to dashboard
-        }}
-      />
+        <SignInPage
+          onSwitchToSignUp={() => setAuthMode("signup")}
+          onSignedIn={() => {
+            setIsAuthenticated(true);
+            setActiveTab("dashboard");
+          }}
+        />
       );
     }
 
     return (
       <SignUpPage
-      onSwitchToSignIn={() => setAuthMode("signin")}
-      onSignedUp={() => {
-        setIsAuthenticated(true);
-        setActiveTab("dashboard");  // 👈 redirect to dashboard
-      }}
-    />
+        onSwitchToSignIn={() => setAuthMode("signin")}
+        onSignedUp={() => {
+          setIsAuthenticated(true);
+          setActiveTab("dashboard");
+        }}
+      />
     );
   }
 
-  // ✅ After login/signup, show your existing UI
+  // Main app
   return (
     <div
-      className={`min-h-screen transition-colors duration-200 ${
+      className={`min-h-screen ${
         theme === "dark"
-          ? "bg-gradient-to-br from-gray-900 via-gray-900 to-gray-800"
-          : "bg-gradient-to-br from-gray-50 via-white to-gray-100"
+          ? "bg-slate-900"
+          : "bg-slate-50"
       }`}
     >
-      <Header />
+      <Header onLogout={handleLogout} />
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        <div className="mb-8 flex gap-3">
-          <button
-            onClick={() => setActiveTab("chat")}
-            className={`px-8 py-3 rounded-xl font-semibold transition-all duration-200 ${
-              activeTab === "chat"
-                ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/50"
-                : theme === "dark"
-                ? "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700"
-                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-200"
-            }`}
-          >
-            💬 Chat
-          </button>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {/* Navigation Tabs - CONSISTENT BLUE */}
+        <div className={`inline-flex rounded-lg p-1 mb-6 ${
+          theme === "dark" ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200 shadow-sm"
+        }`}>
           <button
             onClick={() => setActiveTab("dashboard")}
-            className={`px-8 py-3 rounded-xl font-semibold transition-all duration-200 ${
+            className={`px-6 py-2.5 rounded-md text-sm font-medium transition-colors ${
               activeTab === "dashboard"
-                ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/50"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
                 : theme === "dark"
-                ? "bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700"
-                : "bg-white text-gray-600 hover:bg-gray-50 border border-gray-200"
+                ? "text-slate-400 hover:text-white hover:bg-slate-700"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
             }`}
           >
-            📊 Dashboard
+            <span className="mr-2">📊</span>
+            Dashboard
+          </button>
+          <button
+            onClick={() => setActiveTab("chat")}
+            className={`px-6 py-2.5 rounded-md text-sm font-medium transition-colors ${
+              activeTab === "chat"
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : theme === "dark"
+                ? "text-slate-400 hover:text-white hover:bg-slate-700"
+                : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+            }`}
+          >
+            <span className="mr-2">💬</span>
+            AI Assistant
           </button>
         </div>
 
-        <div className="min-h-[600px]">
-          {activeTab === "chat" ? <ChatPage /> : <DashboardPage />}
-        </div>
-      </div>
-
-      {/* Decorative gradient orbs */}
-      <div className="fixed top-0 left-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl -z-10"></div>
-      <div className="fixed bottom-0 right-0 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl -z-10"></div>
+        {/* Page Content */}
+        {activeTab === "dashboard" ? <DashboardPage /> : <ChatPage />}
+      </main>
     </div>
   );
 };
