@@ -10,13 +10,13 @@ from app.schemas.wallet import WalletResponse
 # ============================================================
 
 class SignUpRequest(BaseModel):
-    name: str = Field(..., min_length=2, max_length=100)
+    name: str = Field(min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(min_length=6)
 
 class SignInRequest(BaseModel):
     email: EmailStr
-    password: str = Field( min_length=6)
+    password: str = Field(min_length=6)
 
 # JWT Token Response
 class Token(BaseModel):
@@ -43,7 +43,7 @@ class UserResponse(BaseModel):
     name: str
     email: str
     wallet_address: Optional[str] = None  # DEPRECATED: Use wallets list instead
-    wallets: List[WalletResponse] = []
+    wallets: List[WalletResponse] = Field(default_factory=list)
 
 # Auth response that includes both user info and token
 class AuthResponse(BaseModel):
