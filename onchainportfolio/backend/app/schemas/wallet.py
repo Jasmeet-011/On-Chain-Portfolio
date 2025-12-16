@@ -8,7 +8,7 @@ from typing import Optional, Literal
 
 class WalletCreateRequest(BaseModel):
     """Request to add a new wallet."""
-    address: str = Field(..., min_length=10, max_length=200)
+    address: str = Field(min_length=10, max_length=200)
     type: Literal["petra", "manual"] = "manual"
     label: str = Field(default="Main Wallet", min_length=1, max_length=100)
     is_primary: bool = False
@@ -25,7 +25,7 @@ class WalletCreateRequest(BaseModel):
 
 class WalletUpdateLabelRequest(BaseModel):
     """Request to update wallet label."""
-    label: str = Field(..., min_length=1, max_length=100)
+    label: str = Field(min_length=1, max_length=100)
     
     class Config:
         json_schema_extra = {
@@ -36,7 +36,7 @@ class WalletUpdateLabelRequest(BaseModel):
 
 class WalletSetPrimaryRequest(BaseModel):
     """Request to set a wallet as primary (by address)."""
-    address: str = Field(..., min_length=10, max_length=200)
+    address: str = Field(min_length=10, max_length=200)
     
     class Config:
         json_schema_extra = {
