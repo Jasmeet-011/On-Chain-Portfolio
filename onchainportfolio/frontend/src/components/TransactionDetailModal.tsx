@@ -1,6 +1,6 @@
 import React from "react";
 import { useAppContext } from "../context/AppContext";
-import { shortenAddress } from "../utils";
+// import { shortenAddress } from "../utils";
 
 interface Transaction {
   hash: string;

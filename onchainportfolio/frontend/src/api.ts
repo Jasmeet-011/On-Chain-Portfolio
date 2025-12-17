@@ -4,8 +4,13 @@
 export const MOCK_MODE = false;
 
 // Backend URL - adjust if your backend runs on a different port
-const API_BASE_URL = "http://localhost:8000/v1";
-const AUTH_BASE_URL = "http://localhost:8000/auth";
+// const API_BASE_URL = "http://localhost:8000/v1";
+// const AUTH_BASE_URL = "http://localhost:8000/auth";
+const API_ORIGIN = import.meta.env.VITE_API_ORIGIN || "http://localhost:8000";
+
+const API_BASE_URL = `${API_ORIGIN}/v1`;
+const AUTH_BASE_URL = `${API_ORIGIN}/auth`;
+
 
 // ============================================================
 // Auth Token Helper
