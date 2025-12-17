@@ -15,7 +15,7 @@ class ChatRequest(BaseModel):
     - "primary": Use only the primary wallet
     - "0x...": Use a specific wallet address (if user owns it)
     """
-    question: str = Field(..., min_length=1, max_length=1000, description="User's question about their portfolio")
+    question: str = Field(min_length=1, max_length=1000, description="User's question about their portfolio")
     scope: str = Field(default="all", description="Which wallets to analyze: 'all', 'primary', or specific address")
     
     @validator('scope')
@@ -63,9 +63,9 @@ class WalletPortfolioResult(BaseModel):
     Result for a single wallet's portfolio fetch.
     Includes success status and error details if failed.
     """
-    address: str = Field(..., description="Wallet address")
-    label: str = Field(..., description="User-friendly wallet name")
-    success: bool = Field(..., description="Whether portfolio was fetched successfully")
+    address: str = Field(description="Wallet address")
+    label: str = Field(description="User-friendly wallet name")
+    success: bool = Field(description="Whether portfolio was fetched successfully")
     error: Optional[str] = Field(None, description="Error message if fetch failed")
     data: Optional[Dict[str, Any]] = Field(None, description="Portfolio data if successful")
     
@@ -78,7 +78,7 @@ class WalletPortfolioResult(BaseModel):
                     "success": True,
                     "error": None,
                     "data": {
-                        "balances": [...],
+                        "balances": [],
                         "total_usd_value": 1234.56
                     }
                 },
@@ -102,17 +102,17 @@ class TokenAggregate(BaseModel):
     symbol: str
     total_amount: float
     total_usd_value: float
-    wallet_count: int = Field(..., description="Number of wallets holding this token")
+    wallet_count: int = Field(description="Number of wallets holding this token")
 
 
 class AggregatedPortfolio(BaseModel):
     """
     Combined portfolio data across multiple wallets.
     """
-    total_usd_value: float = Field(..., description="Total USD value across all wallets")
-    total_wallets: int = Field(..., description="Total number of wallets analyzed")
-    successful_wallets: int = Field(..., description="Number of wallets successfully fetched")
-    failed_wallets: int = Field(..., description="Number of wallets that failed to fetch")
+    total_usd_value: float = Field(description="Total USD value across all wallets")
+    total_wallets: int = Field(description="Total number of wallets analyzed")
+    successful_wallets: int = Field(description="Number of wallets successfully fetched")
+    failed_wallets: int = Field(description="Number of wallets that failed to fetch")
     by_token: List[TokenAggregate] = Field(default_factory=list, description="Aggregated holdings by token")
     wallets: List[Dict[str, Any]] = Field(default_factory=list, description="Individual wallet data")
 
@@ -125,10 +125,10 @@ class ChatResponse(BaseModel):
     """
     Enhanced chat response with detailed wallet results.
     """
-    answer: str = Field(..., description="AI-generated answer to the user's question")
-    portfolio: AggregatedPortfolio = Field(..., description="Aggregated portfolio data")
-    wallet_results: List[WalletPortfolioResult] = Field(..., description="Detailed results for each wallet")
-    scope_used: str = Field(..., description="The scope that was actually used")
+    answer: str = Field(description="AI-generated answer to the user's question")
+    portfolio: AggregatedPortfolio = Field(description="Aggregated portfolio data")
+    wallet_results: List[WalletPortfolioResult] = Field(description="Detailed results for each wallet")
+    scope_used: str = Field(description="The scope that was actually used")
     
     class Config:
         json_schema_extra = {
@@ -153,9 +153,9 @@ class ChatResponse(BaseModel):
                             "wallet_count": 1
                         }
                     ],
-                    "wallets": [...]
+                    "wallets": []
                 },
-                "wallet_results": [...],
+                "wallet_results": [],
                 "scope_used": "all"
             }
         }
