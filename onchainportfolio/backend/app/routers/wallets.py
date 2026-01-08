@@ -18,9 +18,10 @@ from app.services.wallet_service import (
     set_primary_wallet,
     delete_wallet,
     delete_all_user_wallets,
-    validate_aptos_address,
+    validate_wallet_address,  # ← UPDATED: Was validate_aptos_address
+    get_wallet_stats_by_chain,  # ← NEW: Multi-chain stats
 )
-from app.deps import get_current_user, get_current_user_id, aptos_client
+from app.deps import get_current_user, get_current_user_id
 from app.config import settings
 
 router = APIRouter(prefix="/wallets", tags=["wallets"])
@@ -35,6 +36,7 @@ def wallet_to_response(wallet: dict) -> WalletResponse:
         id=wallet["id"],
         user_id=wallet["user_id"],
         address=wallet["address"],
+        chain=wallet.get("chain", "aptos"),  # ← NEW: Include chain
         type=wallet["type"],
         label=wallet["label"],
         is_primary=wallet["is_primary"],
@@ -53,14 +55,16 @@ def add_wallet(
     """
     Add a new wallet to the authenticated user's account.
     
-    - **address**: Aptos wallet address (0x...)
-    - **type**: "petra" or "manual"
+    - **address**: Wallet address
+    - **chain**: Blockchain (aptos or solana)  ← NEW
+    - **type**: "petra", "phantom", or "manual"
     - **label**: Custom name for the wallet
     - **is_primary**: Whether this should be the primary wallet
     """
     wallet = create_wallet(
         user_id=user_id,
         address=payload.address,
+        chain=payload.chain,  # ← NEW: Multi-chain support
         wallet_type=payload.type,
         label=payload.label,
         is_primary=payload.is_primary
@@ -79,17 +83,21 @@ def add_wallet(
 def get_wallets(user_id: str = Depends(get_current_user_id)):
     """
     Get all wallets for the authenticated user.
-    Returns list with primary wallet highlighted.
+    Returns list with primary wallet highlighted and stats by chain.
     """
     wallets = list_user_wallets(user_id)
     
     wallet_responses = [wallet_to_response(w) for w in wallets]
     primary = next((w for w in wallet_responses if w.is_primary), None)
     
+    # Get stats by chain
+    by_chain = get_wallet_stats_by_chain(user_id)  # ← NEW
+    
     return WalletListResponse(
         wallets=wallet_responses,
         total=len(wallet_responses),
-        primary=primary
+        primary=primary,
+        by_chain=by_chain  # ← NEW: {"aptos": 3, "solana": 2}
     )
 
 

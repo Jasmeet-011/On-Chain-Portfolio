@@ -1,16 +1,62 @@
+# ============================================================
+# Core FastAPI Dependencies
+# ============================================================
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+python-multipart==0.0.9
 
+# ============================================================
+# Database
+# ============================================================
 pymongo>=4.9,<5
 
+# ============================================================
+# Data Validation
+# ============================================================
 pydantic==2.9.2
 pydantic-settings==2.5.2
 email-validator==2.2.0
 
+# ============================================================
+# Authentication & Security
+# ============================================================
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-python-multipart==0.0.9
 
-google-generativeai==0.7.2
-httpx==0.27.2
+# ============================================================
+# AI Integration
+# ============================================================
+# Use old API for now (more stable, fewer breaking changes)
+google-generativeai==0.8.3    # Latest stable that works with our code
+
+# ============================================================
+# HTTP Client
+# ============================================================
+# ⚠️ DOWNGRADE: Solana SDK requires httpx<0.24.0
+httpx==0.23.3                 # Compatible with both FastAPI and Solana
+
+# ============================================================
+# Environment & Configuration
+# ============================================================
 python-dotenv==1.0.1
+
+# ============================================================
+# Solana Support
+# ============================================================
+base58==2.1.1                 # For Solana address encoding/decoding
+solders==0.21.0               # Latest stable Solana SDK
+solana==0.34.3                # Latest stable (uses httpx 0.23.x)
+
+# ============================================================
+# Alert System (MVP4)
+# ============================================================
+APScheduler==3.10.4           # Background task scheduling
+sendgrid==6.11.0              # Email notifications
+python-dateutil==2.9.0        # Date parsing for history service
+
+# ============================================================
+# Optional: Development Tools
+# ============================================================
+# pytest==8.0.0               # Testing
+# black==24.0.0               # Code formatting
+# flake8==7.0.0               # Linting

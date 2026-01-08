@@ -1,253 +1,258 @@
-# app/routers/chat.py
-from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List
-from decimal import Decimal
+# backend/app/routers/chat.py - COMPLETE FIXED VERSION FOR MONGODB
 
-from app.schemas.chat import (
-    ChatRequest,
-    ChatResponse,
-    WalletPortfolioResult,
-    AggregatedPortfolio,
-    TokenAggregate
-)
-from app.deps import get_current_user, ai_service
-from app.services.wallet_service import list_user_wallets, get_primary_wallet, get_wallet_by_address
-from .portfolio import get_portfolio
+from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+import os
+from app.models.dto import ChatRequest, ChatResponse, WalletPortfolioResult, AggregatedPortfolio, TokenAggregate
+from app.deps import get_current_user, price_service  # ✅ Import price_service
+from app.services.db import wallets_collection
+from app.services.adapters.aptos_adapter import AptosAdapter
+from app.services.adapters.solana_adapter import SolanaAdapter
+from app.services.ai_service import generate_portfolio_response
 
 router = APIRouter()
 
+# ✅ Initialize with RPC URLs from environment
+APTOS_RPC_URL = os.getenv("APTOS_RPC_URL", "https://fullnode.testnet.aptoslabs.com/v1")
+SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.testnet.solana.com")
 
-def aggregate_portfolios(wallet_results: List[WalletPortfolioResult]) -> AggregatedPortfolio:
+aptos_client = AptosAdapter(rpc_url=APTOS_RPC_URL)
+solana_client = SolanaAdapter(rpc_url=SOLANA_RPC_URL)
+
+
+def get_portfolio_for_wallet(address: str, chain: str) -> dict:
     """
-    Aggregate portfolio data from multiple wallets.
+    Fetch portfolio for a single wallet on specified chain.
     
     Args:
-        wallet_results: List of wallet portfolio results (successful and failed)
-    
+        address: Wallet address
+        chain: 'aptos' or 'solana'
+        
     Returns:
-        AggregatedPortfolio with combined data
+        Portfolio data including balances and total value WITH USD prices
     """
-    # Filter successful wallets
-    successful_results = [r for r in wallet_results if r.success and r.data]
-    
-    # Calculate totals
-    total_usd = 0.0
-    token_aggregates: Dict[str, Dict[str, Any]] = {}
-    all_wallet_data = []
-    
-    for result in successful_results:
-        wallet_data = result.data
+    try:
+        if chain == 'aptos':
+            balances = aptos_client.get_token_balances(address)
+        elif chain == 'solana':
+            balances = solana_client.get_token_balances(address)
+        else:
+            raise ValueError(f"Unsupported chain: {chain}")
         
-        # Add to total USD value
-        if "total_usd_value" in wallet_data:
-            total_usd += float(wallet_data["total_usd_value"])
+        # ✅ NEW: Enrich balances with USD prices
+        enriched_balances = []
+        total_value = 0.0
         
-        # Aggregate tokens
-        for balance in wallet_data.get("balances", []):
-            symbol = balance.get("symbol")
-            if not symbol:
-                continue
+        for balance in balances:
+            symbol = balance.get('symbol')
+            amount = balance.get('amount', 0)
             
-            amount = float(balance.get("amount", 0))
-            usd_value = float(balance.get("usd_value", 0)) if balance.get("usd_value") else 0
+            # Fetch USD price for this token
+            try:
+                usd_price = price_service.get_price(symbol, chain=chain)
+                usd_value = (amount * usd_price) if usd_price else 0.0
+            except Exception as e:
+                print(f"[WARNING] Could not fetch price for {symbol}: {e}")
+                usd_price = None
+                usd_value = 0.0
             
-            if symbol not in token_aggregates:
-                token_aggregates[symbol] = {
-                    "symbol": symbol,
-                    "total_amount": 0.0,
-                    "total_usd_value": 0.0,
-                    "wallet_count": 0
-                }
-            
-            token_aggregates[symbol]["total_amount"] += amount
-            token_aggregates[symbol]["total_usd_value"] += usd_value
-            token_aggregates[symbol]["wallet_count"] += 1
+            # Add USD fields to balance
+            enriched_balance = {
+                **balance,
+                'usd_price': usd_price,
+                'usd_value': usd_value
+            }
+            enriched_balances.append(enriched_balance)
+            total_value += usd_value
         
-        # Store wallet data
-        all_wallet_data.append({
-            "address": result.address,
-            "label": result.label,
-            "data": wallet_data
-        })
+        return {
+            'balances': enriched_balances,
+            'total_usd_value': total_value,
+            'chain': chain
+        }
+    except Exception as e:
+        print(f"Error fetching portfolio for {address} on {chain}: {e}")
+        raise
+
+
+def aggregate_portfolios(wallet_results: list[WalletPortfolioResult]) -> AggregatedPortfolio:
+    """
+    Aggregate portfolio data from multiple wallets across chains.
     
-    # Convert token aggregates to list
+    ✅ UPDATED: Preserves chain information for each wallet
+    """
+    total_usd_value = 0.0
+    successful_wallets = 0
+    failed_wallets = 0
+    
+    # Track tokens across all wallets
+    token_aggregates = {}
+    
+    # Store wallet data with chain info
+    wallets = []
+    
+    for result in wallet_results:
+        if result.success and result.data:
+            successful_wallets += 1
+            wallet_total = result.data.get('total_usd_value', 0)
+            total_usd_value += wallet_total
+            
+            wallets.append({
+                'address': result.address,
+                'label': result.label,
+                'chain': result.chain,
+                'data': result.data
+            })
+            
+            # Aggregate tokens
+            for balance in result.data.get('balances', []):
+                symbol = balance.get('symbol', 'UNKNOWN')
+                amount = balance.get('amount', 0)
+                usd_value = balance.get('usd_value', 0)
+                
+                if symbol not in token_aggregates:
+                    token_aggregates[symbol] = {
+                        'symbol': symbol,
+                        'total_amount': 0,
+                        'total_usd_value': 0,
+                        'wallet_count': 0,
+                        'wallets': []
+                    }
+                
+                token_aggregates[symbol]['total_amount'] += amount
+                token_aggregates[symbol]['total_usd_value'] += usd_value
+                token_aggregates[symbol]['wallet_count'] += 1
+                token_aggregates[symbol]['wallets'].append(result.label)
+        else:
+            failed_wallets += 1
+    
+    # Convert to TokenAggregate objects
     by_token = [
-        TokenAggregate(**agg)
-        for agg in token_aggregates.values()
+        TokenAggregate(
+            symbol=data['symbol'],
+            total_amount=data['total_amount'],
+            total_usd_value=data['total_usd_value'],
+            wallet_count=data['wallet_count']
+        )
+        for data in token_aggregates.values()
     ]
     
+    # Sort by USD value
+    by_token.sort(key=lambda x: x.total_usd_value, reverse=True)
+    
     return AggregatedPortfolio(
-        total_usd_value=round(total_usd, 2),
+        total_usd_value=total_usd_value,
         total_wallets=len(wallet_results),
-        successful_wallets=len(successful_results),
-        failed_wallets=len(wallet_results) - len(successful_results),
+        successful_wallets=successful_wallets,
+        failed_wallets=failed_wallets,
         by_token=by_token,
-        wallets=all_wallet_data
+        wallets=wallets
     )
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat_with_portfolio(
+async def chat(
     request: ChatRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Chat endpoint that answers questions about user's portfolio.
+    Chat endpoint with optimized, context-aware responses.
     
-    **Authentication Required:** Bearer token in Authorization header
-    
-    **Scope Options:**
-    - `"all"`: Analyze all connected wallets (default)
-    - `"primary"`: Analyze only the primary wallet
-    - `"0x..."`: Analyze a specific wallet address (if owned by user)
-    
-    **Features:**
-    - Automatically fetches user's wallets from database
-    - Aggregates portfolio data across multiple wallets
-    - Handles failed wallet fetches gracefully (returns partial results)
-    - Provides detailed results showing which wallets succeeded/failed
-    
-    **Example Request:**
-    ```json
-    {
-        "question": "What tokens do I hold?",
-        "scope": "all"
-    }
-    ```
-    
-    **Example Response:**
-    ```json
-    {
-        "answer": "You hold 50.5 APT across 2 wallets...",
-        "portfolio": {
-            "total_usd_value": 1356.52,
-            "total_wallets": 3,
-            "successful_wallets": 2,
-            "failed_wallets": 1,
-            "by_token": [...]
-        },
-        "wallet_results": [...],
-        "scope_used": "all"
-    }
-    ```
+    ✅ FIXED: Uses MongoDB _id field (not id)
+    ✅ FIXED: Uses correct adapter methods
+    ✅ UPDATED: Ensures chain information is preserved throughout
     """
-    user_id = str(current_user["_id"])
-    
-    print(f"[CHAT] User {user_id} asked: {request.question}")
-    print(f"[CHAT] Scope: {request.scope}")
-    
-    # Step 1: Determine which wallets to use based on scope
-    user_wallets = list_user_wallets(user_id)
-    
-    if not user_wallets:
-        raise HTTPException(
-            status_code=404,
-            detail="No wallets found. Please add a wallet first."
-        )
-    
-    print(f"[CHAT] User has {len(user_wallets)} total wallets")
-    
-    selected_wallets = []
-    
-    if request.scope == "all":
-        selected_wallets = user_wallets
-        print(f"[CHAT] Using all {len(selected_wallets)} wallets")
-    
-    elif request.scope == "primary":
-        primary = get_primary_wallet(user_id)
-        if not primary:
-            raise HTTPException(
-                status_code=404,
-                detail="No primary wallet found. Please set a primary wallet first."
-            )
-        selected_wallets = [primary]
-        print(f"[CHAT] Using primary wallet: {primary['address']}")
-    
-    else:
-        # Specific address requested
-        specific_wallet = get_wallet_by_address(user_id, request.scope)
-        if not specific_wallet:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Wallet {request.scope} not found or not owned by you."
-            )
-        selected_wallets = [specific_wallet]
-        print(f"[CHAT] Using specific wallet: {request.scope}")
-    
-    # Step 2: Fetch portfolio for each wallet (with error handling)
-    wallet_results: List[WalletPortfolioResult] = []
-    
-    for wallet in selected_wallets:
-        address = wallet["address"]
-        label = wallet["label"]
+    try:
+        # ✅ FIXED: Extract user_id from MongoDB _id field
+        user_id = str(current_user["_id"])
+        print(f"[DEBUG] User ID: {user_id}")
+        print(f"[DEBUG] User email: {current_user.get('email')}")
         
-        print(f"[CHAT] Fetching portfolio for {label} ({address})...")
+        # ✅ FIXED: Query MongoDB with correct user_id
+        query = {"user_id": user_id}
         
-        try:
-            portfolio_data = get_portfolio(address)
+        # Determine which wallets to analyze based on scope
+        if request.scope == "all":
+            # Get all user wallets
+            wallets_cursor = wallets_collection.find(query)
+        elif request.scope == "primary":
+            # Get primary wallet only
+            query["is_primary"] = True
+            wallets_cursor = wallets_collection.find(query)
+        else:
+            # Specific wallet by address
+            query["address"] = request.scope
+            wallets_cursor = wallets_collection.find(query)
+        
+        # Convert cursor to list
+        wallets = list(wallets_cursor)
+        
+        print(f"[DEBUG] Found {len(wallets)} wallet(s) for user")
+        
+        if not wallets:
+            raise HTTPException(status_code=404, detail="No wallets found for this scope")
+        
+        # Fetch portfolio for each wallet
+        wallet_results = []
+        
+        for wallet in wallets:
+            address = wallet.get('address')
+            label = wallet.get('label', 'Unknown Wallet')
+            chain = wallet.get('chain', 'aptos')  # Default to aptos for backward compatibility
             
-            wallet_results.append(WalletPortfolioResult(
-                address=address,
-                label=label,
-                success=True,
-                error=None,
-                data=portfolio_data
-            ))
+            print(f"[DEBUG] Processing wallet: {label} ({chain}) - {address}")
             
-            print(f"[CHAT] ✓ Successfully fetched {label}")
-            
-        except Exception as e:
-            error_msg = str(e)
-            print(f"[CHAT] ✗ Failed to fetch {label}: {error_msg}")
-            
-            wallet_results.append(WalletPortfolioResult(
-                address=address,
-                label=label,
-                success=False,
-                error=error_msg,
-                data=None
-            ))
-    
-    # Step 3: Aggregate successful portfolios
-    aggregated = aggregate_portfolios(wallet_results)
-    
-    print(f"[CHAT] Aggregated: {aggregated.successful_wallets}/{aggregated.total_wallets} wallets succeeded")
-    print(f"[CHAT] Total USD value: ${aggregated.total_usd_value}")
-    
-    # Step 4: Check if we have any successful results
-    if aggregated.successful_wallets == 0:
-        raise HTTPException(
-            status_code=502,
-            detail="Failed to fetch portfolio data from all wallets. Please try again later."
+            try:
+                portfolio_data = get_portfolio_for_wallet(address, chain)
+                
+                wallet_results.append(
+                    WalletPortfolioResult(
+                        address=address,
+                        label=label,
+                        chain=chain,
+                        success=True,
+                        error=None,
+                        data=portfolio_data
+                    )
+                )
+            except Exception as e:
+                print(f"[ERROR] Failed to fetch portfolio for {address}: {e}")
+                wallet_results.append(
+                    WalletPortfolioResult(
+                        address=address,
+                        label=label,
+                        chain=chain,
+                        success=False,
+                        error=str(e),
+                        data=None
+                    )
+                )
+        
+        # Aggregate portfolio data
+        aggregated = aggregate_portfolios(wallet_results)
+        
+        print(f"[DEBUG] Aggregated portfolio: ${aggregated.total_usd_value:.2f} across {aggregated.total_wallets} wallets")
+        
+        # Generate optimized AI response
+        answer = generate_portfolio_response(
+            query=request.question,
+            portfolio=aggregated,
+            wallet_results=wallet_results
         )
-    
-    # Step 5: Build context for AI including wallet failure info
-    ai_context = {
-        "portfolio": aggregated.dict(),
-        "wallet_results": [r.dict() for r in wallet_results],
-        "has_failures": aggregated.failed_wallets > 0
-    }
-    
-    # Step 6: Get AI response
-    print(f"[CHAT] Sending to AI service...")
-    
-    answer = ai_service.chat_with_portfolio(
-        question=request.question,
-        portfolio_data=ai_context
-    )
-    
-    if not answer:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate AI response. Please try again."
+        
+        print(f"[DEBUG] Generated answer: {answer[:100]}...")
+        
+        return ChatResponse(
+            answer=answer,
+            portfolio=aggregated,
+            wallet_results=wallet_results,
+            scope_used=request.scope
         )
-    
-    print(f"[CHAT] ✓ Got AI response")
-    
-    # Step 7: Return response
-    return ChatResponse(
-        answer=answer,
-        portfolio=aggregated,
-        wallet_results=wallet_results,
-        scope_used=request.scope
-    )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Error in chat endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to process chat request: {str(e)}")

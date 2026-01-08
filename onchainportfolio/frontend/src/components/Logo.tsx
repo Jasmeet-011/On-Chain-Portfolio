@@ -1,4 +1,4 @@
-// src/components/Logo.tsx - FIXED: Theme-aware text color
+// src/components/Logo.tsx - PROFESSIONAL: White/Black Icon
 import React from "react";
 
 interface LogoProps {
@@ -23,14 +23,18 @@ const Logo: React.FC<LogoProps> = ({
 }) => {
   const config = sizeConfig[size];
   
-  // ✅ FIXED: Text color changes based on theme
-  const textColor = theme === "dark" ? "text-white" : "text-slate-900";
+  // Text color based on theme
+  const textColor = theme === "dark" ? "text-white" : "text-gray-900";
+  
+  // ✅ NEW: Icon inverts based on theme (white in dark, black in light)
+  const iconBg = theme === "dark" ? "bg-white" : "bg-black";
+  const iconText = theme === "dark" ? "text-black" : "text-white";
 
   if (iconOnly) {
     return (
       <div className={`inline-flex items-center ${className}`}>
-        <div className={`${config.iconSize} bg-blue-600 rounded-lg flex items-center justify-center`}>
-          <span className={`text-white font-bold ${config.iconText}`}>C</span>
+        <div className={`${config.iconSize} ${iconBg} rounded-lg flex items-center justify-center`}>
+          <span className={`${iconText} font-bold ${config.iconText}`}>C</span>
         </div>
       </div>
     );
@@ -38,14 +42,14 @@ const Logo: React.FC<LogoProps> = ({
 
   return (
     <div className={`inline-flex items-center gap-2 ${className}`}>
-      {/* Icon - always blue background with white text */}
-      <div className={`${config.iconSize} bg-blue-600 rounded-lg flex items-center justify-center`}>
-        <span className={`text-white font-bold ${config.iconText}`}>C</span>
+      {/* ✅ Icon - white background in dark mode, black in light mode */}
+      <div className={`${config.iconSize} ${iconBg} rounded-lg flex items-center justify-center`}>
+        <span className={`${iconText} font-bold ${config.iconText}`}>C</span>
       </div>
       
-      {/* Text - changes color based on theme */}
+      {/* Text - "Chain" in theme color, "IQ" stays emphasized */}
       <span className={`font-bold ${config.fontSize} ${textColor}`}>
-        Chain<span className="text-blue-500">IQ</span>
+        Chain<span className={theme === "dark" ? "text-white" : "text-gray-900"}>IQ</span>
       </span>
     </div>
   );

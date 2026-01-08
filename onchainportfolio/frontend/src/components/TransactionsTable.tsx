@@ -1,8 +1,10 @@
+// src/components/TransactionsTable.tsx - PROFESSIONAL: Black/White/Gray Theme
 import React, { useState, useEffect } from "react";
 import { useAppContext } from "../context/AppContext";
 import { shortenAddress } from "../utils";
-import TransactionDetailModal from "./TransactionDetailModal";
+import { CheckCircle2, XCircle, ExternalLink, ChevronLeft, ChevronRight, RefreshCw, Receipt } from "lucide-react";
 import TransactionFilters from "./TransactionFilters";
+import TransactionDetailModal from "./TransactionDetailModal";
 
 interface Transaction {
   hash: string;
@@ -11,351 +13,392 @@ interface Transaction {
   timestamp: string;
   gas_used: number;
   sender: string;
+  sequence_number: number;
   type: string;
-  category: string;
   function?: string;
-  details: {
-    recipient?: string;
-    amount?: number;
-    symbol?: string;
-    direction?: string;
-    from_coin?: string;
-    to_coin?: string;
-    action?: string;
-    [key: string]: any;
-  };
 }
 
 interface Props {
   address: string;
-  onLoadTransactions?: (address: string, params: any) => Promise<any>;
+  onLoadTransactions: (address: string, params: any) => Promise<any>;
 }
 
 const TransactionsTable: React.FC<Props> = ({ address, onLoadTransactions }) => {
-  const { theme } = useAppContext();
+  const { theme, activeWallet } = useAppContext();
+  
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selectedTxn, setSelectedTxn] = useState<Transaction | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedTx, setSelectedTx] = useState<string | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
-  
-  // Pagination
-  const [offset, setOffset] = useState(0);
-  const [limit] = useState(20);
-  const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  
-  // Filters
-  const [typeFilter, setTypeFilter] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
-  const [searchQuery, setSearchQuery] = useState<string>("");
+
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const itemsPerPage = 20;
+
+  const chain = activeWallet?.chain || 'aptos';
 
   const loadTransactions = async () => {
-    if (!address || !onLoadTransactions) return;
-    
     setLoading(true);
+    setError(null);
+
     try {
-      const params = {
-        limit,
-        offset,
-        type_filter: typeFilter || undefined,
-        status_filter: statusFilter || undefined,
-        search: searchQuery || undefined,
+      const params: any = {
+        chain,
+        limit: itemsPerPage,
+        offset: (currentPage - 1) * itemsPerPage,
       };
-      
+
+      if (typeFilter !== "all") params.type_filter = typeFilter;
+      if (statusFilter !== "all") params.status_filter = statusFilter;
+      if (searchQuery) params.search = searchQuery;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+
       const result = await onLoadTransactions(address, params);
       
-      setTransactions(result.transactions || []);
-      setTotal(result.total || 0);
-      setHasMore(result.has_more || false);
-    } catch (error) {
-      console.error("[TransactionsTable] Failed to load:", error);
+      if (Array.isArray(result)) {
+        setTransactions(result);
+        setTotalPages(Math.ceil(result.length / itemsPerPage));
+      } else if (result.transactions) {
+        setTransactions(result.transactions);
+        setTotalPages(Math.ceil((result.total || result.transactions.length) / itemsPerPage));
+      } else {
+        setTransactions([]);
+        setTotalPages(1);
+      }
+    } catch (err: any) {
+      console.error("Failed to load transactions:", err);
+      setError(err.message || "Failed to load transactions");
+      setTransactions([]);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadTransactions();
-  }, [address, offset, typeFilter, statusFilter, searchQuery]);
+    if (address) {
+      loadTransactions();
+    }
+  }, [address, currentPage, typeFilter, statusFilter, chain]);
 
-  const handleRowClick = (txn: Transaction) => {
-    setSelectedTxn(txn);
+  const handleSearch = () => {
+    setCurrentPage(1);
+    loadTransactions();
+  };
+
+  const handleReset = () => {
+    setTypeFilter("all");
+    setStatusFilter("all");
+    setSearchQuery("");
+    setDateFrom("");
+    setDateTo("");
+    setCurrentPage(1);
+  };
+
+  const handleTxClick = (hash: string) => {
+    setSelectedTx(hash);
     setShowDetailModal(true);
   };
 
-  const handleNextPage = () => {
-    if (hasMore) {
-      setOffset(offset + limit);
-    }
+  const formatTimestamp = (timestamp: string) => {
+    const date = new Date(parseInt(timestamp) / 1000);
+    return date.toLocaleString();
   };
 
-  const handlePrevPage = () => {
-    if (offset >= limit) {
-      setOffset(offset - limit);
-    }
+  const getTypeColor = (type: string) => {
+    const typeMap: Record<string, string> = {
+      Transfer: theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-100 text-gray-700",
+      Swap: theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-100 text-gray-700",
+      Stake: theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-100 text-gray-700",
+      Unstake: theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-100 text-gray-700",
+    };
+    return typeMap[type] || (theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-100 text-gray-700");
   };
 
-  const formatDate = (timestamp: string) => {
-    try {
-      const tsMicro = parseInt(timestamp);
-      const tsSec = tsMicro / 1_000_000;
-      const date = new Date(tsSec * 1000);
-      return date.toLocaleString();
-    } catch {
-      return timestamp;
-    }
-  };
-
-  const formatAmount = (amount: number | undefined, symbol: string | undefined) => {
-    if (!amount || !symbol) return "N/A";
-    return `${amount.toFixed(4)} ${symbol}`;
-  };
-
-  const getTypeIcon = (type: string, category: string) => {
-    switch (category) {
-      case "transfer":
-        return "💸";
-      case "swap":
-        return "🔄";
-      case "stake":
-        return "📊";
-      case "nft":
-        return "🖼️";
-      case "mint":
-        return "⚡";
-      default:
-        return "📋";
-    }
-  };
-
-  const openExplorer = (hash: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    window.open(`https://explorer.aptoslabs.com/txn/${hash}?network=testnet`, "_blank");
+  const getChainBadge = (txChain?: string) => {
+    const displayChain = (txChain || chain) as 'aptos' | 'solana';
+    const emoji = displayChain === 'aptos' ? '⬢' : '◎';
+    
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border ${
+        theme === "dark" 
+          ? "bg-zinc-800 text-zinc-300 border-zinc-700"
+          : "bg-gray-100 text-gray-700 border-gray-200"
+      }`}>
+        <span>{emoji}</span>
+        {displayChain.toUpperCase()}
+      </span>
+    );
   };
 
   if (loading && transactions.length === 0) {
     return (
+      <div className="flex justify-center items-center py-12">
+        <div className="flex items-center gap-3">
+          <RefreshCw className={`w-6 h-6 animate-spin ${
+            theme === "dark" ? "text-white" : "text-black"
+          }`} />
+          <span className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
+            Loading {chain} transactions...
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
       <div className="text-center py-12">
-        <div className="inline-block w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        <p className={`mt-4 text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-          Loading transactions...
+        <XCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+        <p className={`mb-4 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+          {error}
         </p>
+        <button
+          onClick={loadTransactions}
+          className={`px-4 py-2 rounded-lg transition-colors ${
+            theme === "dark"
+              ? "bg-white text-black hover:bg-gray-200"
+              : "bg-black text-white hover:bg-gray-800"
+          }`}
+        >
+          Try Again
+        </button>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
       <TransactionFilters
         typeFilter={typeFilter}
+        setTypeFilter={setTypeFilter}
         statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
         searchQuery={searchQuery}
-        onTypeFilterChange={setTypeFilter}
-        onStatusFilterChange={setStatusFilter}
-        onSearchChange={setSearchQuery}
-        onExport={() => {
-          window.open(`http://localhost:8000/v1/wallets/${address}/transactions/export/csv`, "_blank");
-        }}
+        setSearchQuery={setSearchQuery}
+        dateFrom={dateFrom}
+        setDateFrom={setDateFrom}
+        dateTo={dateTo}
+        setDateTo={setDateTo}
+        onSearch={handleSearch}
+        onReset={handleReset}
       />
 
-      {/* Results Info */}
-      <div className="flex items-center justify-between">
-        <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-          Showing {transactions.length > 0 ? offset + 1 : 0}-{offset + transactions.length} of {total} transactions
-        </p>
-        {loading && (
-          <div className="flex items-center gap-2 text-sm text-blue-500">
-            <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-            Loading...
-          </div>
-        )}
-      </div>
-
-      {/* Table */}
       {transactions.length === 0 ? (
-        <div className={`text-center py-12 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-          {searchQuery || typeFilter || statusFilter ? (
-            <>
-              <div className="text-4xl mb-4">🔍</div>
-              <p className="font-medium mb-2">No transactions match your filters</p>
-              <p className="text-sm">Try adjusting your search criteria</p>
-            </>
-          ) : (
-            <>
-              <div className="text-4xl mb-4">📭</div>
-              <p>No transactions found</p>
-            </>
-          )}
+        <div className="text-center py-12">
+          <Receipt className={`w-12 h-12 mx-auto mb-4 ${
+            theme === "dark" ? "text-zinc-600" : "text-gray-400"
+          }`} />
+          <h3 className={`text-lg font-semibold mb-2 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+            No Transactions Found
+          </h3>
+          <p className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
+            No transaction history available for this wallet on {chain}
+          </p>
         </div>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead>
-              <tr className={`border-b ${theme === "dark" ? "border-gray-700" : "border-gray-200"}`}>
-                <th className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Type
-                </th>
-                <th className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Details
-                </th>
-                <th className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Time
-                </th>
-                <th className={`px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Amount
-                </th>
-                <th className={`px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.map((txn, idx) => (
-                <tr
-                  key={idx}
-                  onClick={() => handleRowClick(txn)}
-                  className={`border-b transition-colors cursor-pointer ${
+        <>
+          {/* Desktop Table */}
+          <div className="hidden lg:block overflow-x-auto">
+            <table className="min-w-full">
+              <thead>
+                <tr className={`border-b ${theme === "dark" ? "border-zinc-800" : "border-gray-200"}`}>
+                  <th className={`px-4 py-3 text-left text-xs font-semibold uppercase ${
+                    theme === "dark" ? "text-zinc-500" : "text-gray-600"
+                  }`}>Status</th>
+                  <th className={`px-4 py-3 text-left text-xs font-semibold uppercase ${
+                    theme === "dark" ? "text-zinc-500" : "text-gray-600"
+                  }`}>Chain</th>
+                  <th className={`px-4 py-3 text-left text-xs font-semibold uppercase ${
+                    theme === "dark" ? "text-zinc-500" : "text-gray-600"
+                  }`}>Type</th>
+                  <th className={`px-4 py-3 text-left text-xs font-semibold uppercase ${
+                    theme === "dark" ? "text-zinc-500" : "text-gray-600"
+                  }`}>Hash</th>
+                  <th className={`px-4 py-3 text-left text-xs font-semibold uppercase ${
+                    theme === "dark" ? "text-zinc-500" : "text-gray-600"
+                  }`}>Time</th>
+                  <th className={`px-4 py-3 text-right text-xs font-semibold uppercase ${
+                    theme === "dark" ? "text-zinc-500" : "text-gray-600"
+                  }`}>Gas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map((tx, idx) => (
+                  <tr
+                    key={`${tx.hash}-${idx}`}
+                    onClick={() => handleTxClick(tx.hash)}
+                    className={`border-b cursor-pointer transition-colors ${
+                      theme === "dark"
+                        ? "border-zinc-800 hover:bg-zinc-900/50"
+                        : "border-gray-100 hover:bg-gray-50"
+                    }`}
+                  >
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        {tx.success ? (
+                          <CheckCircle2 className="w-5 h-5 text-green-500" />
+                        ) : (
+                          <XCircle className="w-5 h-5 text-red-500" />
+                        )}
+                        <span className={`text-sm font-medium ${
+                          tx.success ? "text-green-500" : "text-red-500"
+                        }`}>
+                          {tx.success ? "Success" : "Failed"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4">{getChainBadge()}</td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${getTypeColor(tx.type)}`}>
+                        {tx.type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <span className={`font-mono text-sm ${
+                          theme === "dark" ? "text-zinc-300" : "text-gray-700"
+                        }`}>
+                          {shortenAddress(tx.hash)}
+                        </span>
+                        <ExternalLink className={`w-3 h-3 ${
+                          theme === "dark" ? "text-zinc-500" : "text-gray-500"
+                        }`} />
+                      </div>
+                    </td>
+                    <td className={`px-4 py-4 text-sm ${
+                      theme === "dark" ? "text-zinc-400" : "text-gray-600"
+                    }`}>
+                      {formatTimestamp(tx.timestamp)}
+                    </td>
+                    <td className={`px-4 py-4 text-right text-sm ${
+                      theme === "dark" ? "text-zinc-400" : "text-gray-600"
+                    }`}>
+                      {tx.gas_used}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Card View */}
+          <div className="lg:hidden space-y-3">
+            {transactions.map((tx, idx) => (
+              <div
+                key={`${tx.hash}-${idx}`}
+                onClick={() => handleTxClick(tx.hash)}
+                className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                  theme === "dark"
+                    ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-800"
+                    : "bg-white border-gray-200 hover:bg-gray-50"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    {tx.success ? (
+                      <CheckCircle2 className="w-5 h-5 text-green-500" />
+                    ) : (
+                      <XCircle className="w-5 h-5 text-red-500" />
+                    )}
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${getTypeColor(tx.type)}`}>
+                      {tx.type}
+                    </span>
+                  </div>
+                  {getChainBadge()}
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm ${theme === "dark" ? "text-zinc-500" : "text-gray-600"}`}>
+                      Hash
+                    </span>
+                    <span className={`font-mono text-sm ${
+                      theme === "dark" ? "text-zinc-300" : "text-gray-700"
+                    }`}>
+                      {shortenAddress(tx.hash)}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm ${theme === "dark" ? "text-zinc-500" : "text-gray-600"}`}>
+                      Gas
+                    </span>
+                    <span className={`text-sm ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                      {tx.gas_used}
+                    </span>
+                  </div>
+
+                  <div className={`text-xs ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
+                    {formatTimestamp(tx.timestamp)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-4">
+              <div className={`text-sm ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                Page {currentPage} of {totalPages}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
+                    currentPage === 1
+                      ? "opacity-50 cursor-not-allowed"
+                      : ""
+                  } ${
                     theme === "dark"
-                      ? "border-gray-800 hover:bg-gray-800/50"
-                      : "border-gray-100 hover:bg-gray-50"
+                      ? "bg-zinc-900 text-zinc-300 hover:bg-zinc-800 border border-zinc-800"
+                      : "bg-white text-gray-700 hover:bg-gray-50 border border-gray-200"
                   }`}
                 >
-                  {/* Type */}
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{getTypeIcon(txn.type, txn.category)}</span>
-                      <span
-                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          txn.category === "transfer"
-                            ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                            : txn.category === "swap"
-                            ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                            : txn.category === "stake"
-                            ? "bg-green-500/10 text-green-400 border border-green-500/20"
-                            : "bg-gray-500/10 text-gray-400 border border-gray-500/20"
-                        }`}
-                      >
-                        {txn.type}
-                      </span>
-                    </div>
-                  </td>
-
-                  {/* Details */}
-                  <td className="px-4 py-4">
-                    <div className={`text-sm ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
-                      {txn.category === "transfer" && txn.details.recipient && (
-                        <div>
-                          To: <span className="font-mono text-xs">{shortenAddress(txn.details.recipient)}</span>
-                        </div>
-                      )}
-                      {txn.category === "swap" && (
-                        <div>
-                          {txn.details.from_coin} → {txn.details.to_coin}
-                        </div>
-                      )}
-                      {txn.category === "stake" && (
-                        <div className="capitalize">
-                          {txn.details.action || "Stake"}
-                        </div>
-                      )}
-                      {!["transfer", "swap", "stake"].includes(txn.category) && (
-                        <div className="font-mono text-xs">
-                          {shortenAddress(txn.hash)}
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      onClick={(e) => openExplorer(txn.hash, e)}
-                      className={`text-xs mt-1 hover:underline ${theme === "dark" ? "text-blue-400" : "text-blue-600"}`}
-                    >
-                      View on explorer →
-                    </button>
-                  </td>
-
-                  {/* Time */}
-                  <td className={`px-4 py-4 text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                    {formatDate(txn.timestamp)}
-                  </td>
-
-                  {/* Amount */}
-                  <td className={`px-4 py-4 text-right ${theme === "dark" ? "text-gray-300" : "text-gray-700"}`}>
-                    {txn.details.amount && txn.details.symbol ? (
-                      <div>
-                        <div className="font-semibold">
-                          {formatAmount(txn.details.amount, txn.details.symbol)}
-                        </div>
-                        <div className={`text-xs ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-                          Gas: {txn.gas_used}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className={`text-sm ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-                        Gas: {txn.gas_used}
-                      </div>
-                    )}
-                  </td>
-
-                  {/* Status */}
-                  <td className="px-4 py-4 text-center">
-                    {txn.success ? (
-                      <span className="text-green-500 text-xl">✓</span>
-                    ) : (
-                      <span className="text-red-500 text-xl">✗</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  <ChevronLeft className="w-4 h-4" />
+                  Previous
+                </button>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-1 ${
+                    currentPage === totalPages
+                      ? "opacity-50 cursor-not-allowed"
+                      : ""
+                  } ${
+                    theme === "dark"
+                      ? "bg-zinc-900 text-zinc-300 hover:bg-zinc-800 border border-zinc-800"
+                      : "bg-white text-gray-700 hover:bg-gray-50 border border-gray-200"
+                  }`}
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Pagination */}
-      {transactions.length > 0 && (
-        <div className="flex items-center justify-between pt-4 border-t border-gray-700">
-          <button
-            onClick={handlePrevPage}
-            disabled={offset === 0}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              offset === 0
-                ? "opacity-50 cursor-not-allowed"
-                : theme === "dark"
-                ? "bg-gray-700 text-gray-300 hover:bg-gray-600"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            ← Previous
-          </button>
-          
-          <span className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-            Page {Math.floor(offset / limit) + 1}
-          </span>
-          
-          <button
-            onClick={handleNextPage}
-            disabled={!hasMore}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              !hasMore
-                ? "opacity-50 cursor-not-allowed"
-                : theme === "dark"
-                ? "bg-gray-700 text-gray-300 hover:bg-gray-600"
-                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-            }`}
-          >
-            Next →
-          </button>
-        </div>
-      )}
-
-      {/* Transaction Detail Modal */}
-      {showDetailModal && selectedTxn && (
+      {selectedTx && (
         <TransactionDetailModal
-          transaction={selectedTxn}
+          isOpen={showDetailModal}
           onClose={() => {
             setShowDetailModal(false);
-            setSelectedTxn(null);
+            setSelectedTx(null);
           }}
+          txHash={selectedTx}
+          address={address}
+          chain={chain}
         />
       )}
     </div>
