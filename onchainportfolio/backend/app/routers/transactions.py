@@ -11,6 +11,7 @@ from app.services.cache import cache
 from app.services.transaction_parser import TransactionParser
 from app.deps import get_current_user, get_current_user_optional
 from app.services.wallet_service import list_user_wallets
+from app.services.adapters import get_adapter_for_chain  # ← NEW
 
 router = APIRouter()
 
@@ -18,6 +19,7 @@ router = APIRouter()
 @router.get("/wallets/{address}/transactions")
 def get_transactions(
     address: str = Path(..., min_length=3, max_length=200),
+    chain: str = Query("aptos", description="Blockchain: aptos or solana"),  # ← NEW
     limit: int = Query(20, ge=1, le=100, description="Number of transactions to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     type_filter: Optional[str] = Query(None, description="Filter by type: transfer, swap, stake, etc."),
@@ -29,6 +31,8 @@ def get_transactions(
     """
     Get transaction history for a wallet with filters, search, and pagination.
     
+    Now supports multiple chains!
+    
     Returns:
         {
             "transactions": [...],
@@ -38,55 +42,44 @@ def get_transactions(
             "has_more": true
         }
     """
-    # Normalize address
-    addr = address.lower()
-    if not addr.startswith("0x"):
-        addr = "0x" + addr
+    try:
+        # Get adapter for this chain
+        adapter = get_adapter_for_chain(chain)
+        normalized_addr = adapter.normalize_address(address)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     # Build cache key with filters
-    cache_key = f"transactions:{addr}:{limit}:{offset}:{type_filter}:{status_filter}:{search}:{date_from}:{date_to}"
+    cache_key = f"transactions:{chain}:{normalized_addr}:{limit}:{offset}:{type_filter}:{status_filter}:{search}:{date_from}:{date_to}"
     cached = cache.get(cache_key)
     if cached:
-        print(f"[CACHE] Returning cached transactions for {addr}")
+        print(f"[CACHE] Returning cached transactions for {normalized_addr} on {chain}")
         return cached
     
     try:
-        # Fetch more transactions for filtering (we'll filter client-side for now)
-        fetch_limit = min(100, limit * 3)  # Fetch extra for filtering
-        url = f"https://fullnode.testnet.aptoslabs.com/v1/accounts/{addr}/transactions"
-        params = {"limit": fetch_limit, "start": offset}
+        print(f"[INFO] Fetching transactions for {normalized_addr} on {chain}...")
         
-        print(f"[INFO] Fetching transactions for {addr}...")
+        # Use adapter to get transactions
+        raw_txns = adapter.get_transactions(normalized_addr, limit=min(100, limit * 3), offset=offset)
         
-        with httpx.Client(timeout=15.0) as client:
-            response = client.get(url, params=params)
+        # For Aptos, we have a parser; for Solana, return simplified format
+        if chain == "aptos":
+            parser = TransactionParser()
+            transactions = []
             
-            if response.status_code == 404:
-                return {
-                    "transactions": [],
-                    "total": 0,
-                    "offset": offset,
-                    "limit": limit,
-                    "has_more": False
-                }
+            for txn in raw_txns:
+                if txn.get("type") != "user_transaction":
+                    continue
+                
+                parsed = parser.parse_transaction(txn)
+                transactions.append(parsed)
             
-            response.raise_for_status()
-            raw_txns = response.json()
+            print(f"[INFO] Parsed {len(transactions)} Aptos user transactions")
         
-        print(f"[INFO] Received {len(raw_txns)} raw transactions")
-        
-        # Parse transactions
-        parser = TransactionParser()
-        transactions = []
-        
-        for txn in raw_txns:
-            if txn.get("type") != "user_transaction":
-                continue
-            
-            parsed = parser.parse_transaction(txn)
-            transactions.append(parsed)
-        
-        print(f"[INFO] Parsed {len(transactions)} user transactions")
+        else:  # Solana
+            # Solana transactions from adapter are already simplified
+            transactions = raw_txns
+            print(f"[INFO] Received {len(transactions)} Solana transactions")
         
         # Apply filters
         filtered_txns = transactions
@@ -96,22 +89,23 @@ def get_transactions(
             type_lower = type_filter.lower()
             filtered_txns = [
                 t for t in filtered_txns 
-                if type_lower in t["type"].lower() or type_lower in t["category"].lower()
+                if type_lower in t.get("type", "").lower() or type_lower in t.get("category", "").lower()
             ]
         
         # Status filter
         if status_filter:
             if status_filter.lower() == "success":
-                filtered_txns = [t for t in filtered_txns if t["success"]]
+                filtered_txns = [t for t in filtered_txns if t.get("success", True)]
             elif status_filter.lower() == "failed":
-                filtered_txns = [t for t in filtered_txns if not t["success"]]
+                filtered_txns = [t for t in filtered_txns if not t.get("success", True)]
         
         # Search filter
         if search:
             search_lower = search.lower()
             filtered_txns = [
                 t for t in filtered_txns
-                if search_lower in t["hash"].lower() 
+                if search_lower in t.get("hash", "").lower() 
+                or search_lower in t.get("signature", "").lower()
                 or search_lower in t.get("function", "").lower()
                 or search_lower in t.get("details", {}).get("recipient", "").lower()
             ]
@@ -122,7 +116,7 @@ def get_transactions(
         
         # Pagination
         total = len(filtered_txns)
-        start = 0  # Already offset by API call
+        start = 0
         end = min(limit, len(filtered_txns))
         paginated_txns = filtered_txns[start:end]
         
@@ -131,7 +125,8 @@ def get_transactions(
             "total": total,
             "offset": offset,
             "limit": limit,
-            "has_more": len(filtered_txns) >= limit
+            "has_more": len(filtered_txns) >= limit,
+            "chain": chain  # ← Include chain in response
         }
         
         # Cache for 30 seconds
@@ -139,22 +134,20 @@ def get_transactions(
         
         return result
         
-    except httpx.HTTPStatusError as e:
-        print(f"[ERROR] HTTP error {e.response.status_code}: {e}")
-        if e.response.status_code == 404:
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch transactions: {e}")
+        
+        # Return empty result instead of error for 404
+        if "404" in str(e):
             return {
                 "transactions": [],
                 "total": 0,
                 "offset": offset,
                 "limit": limit,
-                "has_more": False
+                "has_more": False,
+                "chain": chain
             }
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to fetch transactions: HTTP {e.response.status_code}"
-        )
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch transactions: {e}")
+        
         raise HTTPException(
             status_code=502,
             detail=f"Failed to fetch transactions: {str(e)}"
@@ -164,14 +157,27 @@ def get_transactions(
 @router.get("/wallets/{address}/transactions/{hash}")
 def get_transaction_detail(
     address: str = Path(..., min_length=3, max_length=200),
-    hash: str = Path(..., description="Transaction hash")
+    hash: str = Path(..., description="Transaction hash or signature"),
+    chain: str = Query("aptos", description="Blockchain: aptos or solana")  # ← NEW
 ) -> Dict[str, Any]:
     """
     Get detailed information for a specific transaction.
+    
+    Now supports multiple chains!
     """
-    addr = address.lower()
-    if not addr.startswith("0x"):
-        addr = "0x" + addr
+    try:
+        adapter = get_adapter_for_chain(chain)
+        normalized_addr = adapter.normalize_address(address)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    # For now, this endpoint only works well with Aptos
+    # Solana would need additional implementation
+    if chain != "aptos":
+        raise HTTPException(
+            status_code=501,
+            detail=f"Transaction details not yet implemented for {chain}"
+        )
     
     try:
         url = f"https://fullnode.testnet.aptoslabs.com/v1/transactions/by_hash/{hash}"
@@ -191,6 +197,7 @@ def get_transaction_detail(
         
         # Add raw data for debugging
         parsed["raw"] = raw_txn
+        parsed["chain"] = chain
         
         return parsed
         
@@ -212,18 +219,17 @@ def get_transaction_detail(
 @router.get("/wallets/{address}/transactions/export/csv")
 def export_transactions_csv(
     address: str = Path(..., min_length=3, max_length=200),
+    chain: str = Query("aptos", description="Blockchain: aptos or solana"),  # ← NEW
     limit: int = Query(100, ge=1, le=1000),
     current_user: Optional[dict] = Depends(get_current_user_optional)
 ):
     """
     Export transactions as CSV file.
-    """
-    addr = address.lower()
-    if not addr.startswith("0x"):
-        addr = "0x" + addr
     
-    # Get transactions (without pagination for export)
-    txn_data = get_transactions(address=addr, limit=limit, offset=0)
+    Now supports multiple chains!
+    """
+    # Get transactions
+    txn_data = get_transactions(address=address, chain=chain, limit=limit, offset=0)
     transactions = txn_data["transactions"]
     
     # Create CSV in memory
@@ -232,7 +238,7 @@ def export_transactions_csv(
     
     # Write header
     writer.writerow([
-        "Hash",
+        "Hash/Signature",
         "Type",
         "Status",
         "Timestamp",
@@ -241,7 +247,8 @@ def export_transactions_csv(
         "Amount",
         "Symbol",
         "Gas Used",
-        "Function"
+        "Function",
+        "Chain"
     ])
     
     # Write transactions
@@ -250,24 +257,30 @@ def export_transactions_csv(
         
         # Format timestamp
         try:
-            ts_micro = int(txn["timestamp"])
-            ts_sec = ts_micro / 1_000_000
-            dt = datetime.fromtimestamp(ts_sec)
-            timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            timestamp_val = txn.get("timestamp") or txn.get("blockTime")
+            if timestamp_val:
+                ts_micro = int(timestamp_val)
+                # Aptos uses microseconds, Solana uses seconds
+                ts_sec = ts_micro / 1_000_000 if chain == "aptos" else ts_micro
+                dt = datetime.fromtimestamp(ts_sec)
+                timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+            else:
+                timestamp_str = "N/A"
         except:
-            timestamp_str = txn["timestamp"]
+            timestamp_str = str(timestamp_val) if timestamp_val else "N/A"
         
         writer.writerow([
-            txn["hash"],
-            txn["type"],
-            "Success" if txn["success"] else "Failed",
+            txn.get("hash") or txn.get("signature", "N/A"),
+            txn.get("type", "N/A"),
+            "Success" if txn.get("success") else "Failed",
             timestamp_str,
-            txn["sender"],
+            txn.get("sender", "N/A"),
             details.get("recipient", "N/A"),
             details.get("amount", "N/A"),
             details.get("symbol", "N/A"),
-            txn["gas_used"],
-            txn.get("function", "N/A")
+            txn.get("gas_used", "N/A"),
+            txn.get("function", "N/A"),
+            chain
         ])
     
     # Prepare response
@@ -277,7 +290,7 @@ def export_transactions_csv(
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={
-            "Content-Disposition": f"attachment; filename=transactions_{addr[:10]}.csv"
+            "Content-Disposition": f"attachment; filename=transactions_{chain}_{address[:10]}.csv"
         }
     )
 
@@ -287,7 +300,7 @@ def get_transaction_summary(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get transaction summary across all user's wallets.
+    Get transaction summary across all user's wallets (multi-chain).
     Used for AI insights and dashboard stats.
     """
     user_id = str(current_user["_id"])
@@ -296,6 +309,7 @@ def get_transaction_summary(
     summary = {
         "total_transactions": 0,
         "by_type": {},
+        "by_chain": {},  # ← NEW
         "by_wallet": [],
         "total_gas_spent": 0,
         "success_rate": 0.0
@@ -306,37 +320,42 @@ def get_transaction_summary(
     
     for wallet in wallets:
         addr = wallet["address"]
+        chain = wallet.get("chain", "aptos")
         
         try:
             # Get transactions for this wallet
-            txn_data = get_transactions(address=addr, limit=50, offset=0)
+            txn_data = get_transactions(address=addr, chain=chain, limit=50, offset=0)
             txns = txn_data["transactions"]
             
             wallet_summary = {
                 "address": addr,
+                "chain": chain,  # ← NEW
                 "label": wallet["label"],
                 "transaction_count": len(txns),
                 "by_type": {}
             }
             
+            # Count by chain
+            summary["by_chain"][chain] = summary["by_chain"].get(chain, 0) + len(txns)
+            
             for txn in txns:
                 total_count += 1
-                if txn["success"]:
+                if txn.get("success", True):
                     total_success += 1
                 
                 # Count by type
-                txn_type = txn["type"]
+                txn_type = txn.get("type", "Unknown")
                 summary["by_type"][txn_type] = summary["by_type"].get(txn_type, 0) + 1
                 wallet_summary["by_type"][txn_type] = wallet_summary["by_type"].get(txn_type, 0) + 1
                 
                 # Sum gas
-                summary["total_gas_spent"] += txn["gas_used"]
+                summary["total_gas_spent"] += txn.get("gas_used", 0)
             
             summary["by_wallet"].append(wallet_summary)
             summary["total_transactions"] += len(txns)
             
         except Exception as e:
-            print(f"[ERROR] Failed to get transactions for {addr}: {e}")
+            print(f"[ERROR] Failed to get transactions for {addr} on {chain}: {e}")
             continue
     
     # Calculate success rate
@@ -355,9 +374,16 @@ def apply_date_filters(transactions: List[Dict[str, Any]], date_from: Optional[s
     
     for txn in transactions:
         try:
-            # Parse transaction timestamp (microseconds)
-            ts_micro = int(txn["timestamp"])
-            ts_sec = ts_micro / 1_000_000
+            # Get timestamp (different field names for different chains)
+            timestamp_val = txn.get("timestamp") or txn.get("blockTime")
+            if not timestamp_val:
+                filtered.append(txn)
+                continue
+            
+            # Parse timestamp
+            ts_micro = int(timestamp_val)
+            # Aptos uses microseconds, Solana uses seconds
+            ts_sec = ts_micro / 1_000_000 if "timestamp" in txn else ts_micro
             txn_date = datetime.fromtimestamp(ts_sec)
             
             # Check date_from

@@ -1,0 +1,15 @@
+SOLANA TEST WALLETS
+======================================================================
+
+Wallet #1:
+Public Key:  Cy3XydEzwzumeufTcmsau4sqCaLxkKn9uW4rdAsJ9qc4
+Private Key: Cy3XydEzwzumeufTcmsau4sqCaLxkKn9uW4rdAsJ9qc4
+
+Wallet #2:
+Public Key:  Ah54qpSttuFTxgSKusRG8UWgTzJ6uN5MtZA1Hzgq79mJ
+Private Key: Ah54qpSttuFTxgSKusRG8UWgTzJ6uN5MtZA1Hzgq79mJ
+
+Wallet #3:
+Public Key:  26YCQeBXdLv5wQ3HJs9fBZnzX4pe15mTLFJHH2F1nFLd
+Private Key: 26YCQeBXdLv5wQ3HJs9fBZnzX4pe15mTLFJHH2F1nFLd
+

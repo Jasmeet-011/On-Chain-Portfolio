@@ -1,11 +1,9 @@
-// src/api.ts
+// src/api.ts - UPDATED: Added Wallet Filtering Support
 
 // Toggle this to switch between mock and real backend
 export const MOCK_MODE = false;
 
 // Backend URL - adjust if your backend runs on a different port
-// const API_BASE_URL = "http://localhost:8000/v1";
-// const AUTH_BASE_URL = "http://localhost:8000/auth";
 const API_ORIGIN = import.meta.env.VITE_API_ORIGIN || "http://localhost:8000";
 
 const API_BASE_URL = `${API_ORIGIN}/v1`;
@@ -103,14 +101,14 @@ export const api = {
   /**
    * Get token balances for a wallet
    */
-  async getBalances(address: string) {
+  async getBalances(address: string, chain: string = "aptos") {
     if (MOCK_MODE) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       return MOCK_RESPONSE.portfolio.wallets[0].data.balances;
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/wallets/${address}/balances`);
+      const res = await fetch(`${API_BASE_URL}/wallets/${address}/balances?chain=${chain}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     } catch (error) {
@@ -122,15 +120,16 @@ export const api = {
   /**
    * Get token prices
    */
-  async getPrices(symbols: string[]) {
+  async getPrices(symbols: string[], chain?: string) {
     if (MOCK_MODE) {
       await new Promise((resolve) => setTimeout(resolve, 300));
-      return { APT: 7.12, USDC: 1.0 };
+      return { APT: 7.12, USDC: 1.0, SOL: 126.04 };
     }
 
     try {
       const symbolsParam = symbols.join(",");
-      const res = await fetch(`${API_BASE_URL}/prices?symbols=${symbolsParam}`);
+      const chainParam = chain ? `&chain=${chain}` : '';
+      const res = await fetch(`${API_BASE_URL}/prices?symbols=${symbolsParam}${chainParam}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       return data.prices;
@@ -143,14 +142,14 @@ export const api = {
   /**
    * Get complete portfolio for a wallet
    */
-  async getPortfolio(address: string) {
+  async getPortfolio(address: string, chain: string = "aptos") {
     if (MOCK_MODE) {
       await new Promise((resolve) => setTimeout(resolve, 800));
       return MOCK_RESPONSE.portfolio.wallets[0].data;
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/wallets/${address}/portfolio`);
+      const res = await fetch(`${API_BASE_URL}/wallets/${address}/portfolio?chain=${chain}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     } catch (error) {
@@ -161,7 +160,6 @@ export const api = {
 
   /**
    * Chat with AI about portfolio
-   * NEW: Now supports scope parameter
    */
   async chat(question: string, scope: string = "all") {
     if (MOCK_MODE) {
@@ -190,14 +188,20 @@ export const api = {
   /**
    * Get transaction history for a wallet
    */
-  async getTransactions(address: string, limit: number = 20): Promise<Transaction[]> {
+  async getTransactions(
+    address: string, 
+    chain: string = "aptos",
+    limit: number = 20
+  ): Promise<Transaction[]> {
     if (MOCK_MODE) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       return MOCK_TRANSACTIONS;
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/wallets/${address}/transactions?limit=${limit}`);
+      const res = await fetch(
+        `${API_BASE_URL}/wallets/${address}/transactions?chain=${chain}&limit=${limit}`
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     } catch (error) {
@@ -212,6 +216,7 @@ export const api = {
   async getTransactionsFiltered(
     address: string,
     params: {
+      chain?: string;
       limit?: number;
       offset?: number;
       type_filter?: string;
@@ -223,6 +228,7 @@ export const api = {
   ) {
     const queryParams = new URLSearchParams();
     
+    if (params.chain) queryParams.append("chain", params.chain);
     if (params.limit) queryParams.append("limit", params.limit.toString());
     if (params.offset) queryParams.append("offset", params.offset.toString());
     if (params.type_filter) queryParams.append("type_filter", params.type_filter);
@@ -247,10 +253,14 @@ export const api = {
   /**
    * Get transaction detail
    */
-  async getTransactionDetail(address: string, hash: string) {
+  async getTransactionDetail(
+    address: string, 
+    hash: string,
+    chain: string = "aptos"
+  ) {
     try {
       const res = await fetch(
-        `${API_BASE_URL}/wallets/${address}/transactions/${hash}`,
+        `${API_BASE_URL}/wallets/${address}/transactions/${hash}?chain=${chain}`,
         { headers: getAuthHeaders() }
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -367,7 +377,7 @@ export const api = {
   },
 
   // ============================================================
-  // NEW: Wallet Management Endpoints (Using /v1/wallets)
+  // Wallet Management Endpoints (Multi-Chain Support)
   // ============================================================
 
   /**
@@ -378,8 +388,10 @@ export const api = {
       return [
         {
           id: "mock_wallet_1",
+          _id: "mock_wallet_1", // ✅ Added for compatibility
           user_id: "mock123",
           address: "0x06c52...",
+          chain: "aptos",
           type: "manual",
           label: "Main Wallet",
           is_primary: true,
@@ -396,7 +408,6 @@ export const api = {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       
-      // Backend returns { wallets: [], total: N, primary: {...} }
       return data.wallets || [];
     } catch (error) {
       console.error("Failed to get wallets:", error);
@@ -410,14 +421,17 @@ export const api = {
   async addWallet(
     address: string,
     label: string = "Wallet",
-    type: "petra" | "manual" = "manual",
-    isPrimary: boolean = false
+    type: "petra" | "phantom" | "manual" = "manual",
+    isPrimary: boolean = false,
+    chain: "aptos" | "solana" = "aptos"
   ): Promise<WalletResponse> {
     if (MOCK_MODE) {
       return {
         id: "mock_wallet_2",
+        _id: "mock_wallet_2", // ✅ Added for compatibility
         user_id: "mock123",
         address,
+        chain,
         type,
         label,
         is_primary: isPrimary,
@@ -431,6 +445,7 @@ export const api = {
         headers: getAuthHeaders(),
         body: JSON.stringify({
           address,
+          chain,
           type,
           label,
           is_primary: isPrimary,
@@ -440,14 +455,12 @@ export const api = {
       if (!res.ok) {
         const error = await res.json().catch(() => ({}));
         
-        // Parse backend validation errors
         let errorMessage = "Failed to add wallet";
         
         if (error.detail) {
           if (typeof error.detail === "string") {
             errorMessage = error.detail;
           } else if (Array.isArray(error.detail)) {
-            // FastAPI validation errors
             errorMessage = error.detail.map((e: any) => e.msg).join(", ");
           }
         }
@@ -491,8 +504,10 @@ export const api = {
     if (MOCK_MODE) {
       return {
         id: "mock_wallet_1",
+        _id: "mock_wallet_1", // ✅ Added for compatibility
         user_id: "mock123",
         address,
+        chain: "aptos",
         type: "manual",
         label,
         is_primary: true,
@@ -522,8 +537,10 @@ export const api = {
     if (MOCK_MODE) {
       return {
         id: "mock_wallet_1",
+        _id: "mock_wallet_1", // ✅ Added for compatibility
         user_id: "mock123",
         address,
+        chain: "aptos",
         type: "manual",
         label: "Wallet",
         is_primary: true,
@@ -545,7 +562,171 @@ export const api = {
       throw error;
     }
   },
+  
+  // ============================================================
+  // HISTORY ENDPOINTS
+  // ============================================================
+
+  /**
+   * Get historical price data for a token
+   */
+  async getPriceHistory(
+    symbol: string,
+    days: number = 7,
+    chain?: string
+  ): Promise<PriceHistoryResponse> {
+    if (MOCK_MODE) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const now = Date.now() / 1000;
+      const prices = Array.from({ length: days * 24 }, (_, i) => ({
+        timestamp: now - (days * 24 - i) * 3600,
+        price: 120 + Math.random() * 10
+      }));
+      return {
+        symbol,
+        prices,
+        current_price: 125.67,
+        change_24h: 2.34,
+        change_percent: 1.90,
+        period_change: 5.67,
+        period_change_percent: 4.72,
+        data_points: prices.length
+      };
+    }
+
+    try {
+      const chainParam = chain ? `&chain=${chain}` : '';
+      const res = await fetch(
+        `${API_BASE_URL}/history/prices/history/${symbol}?days=${days}${chainParam}`,
+        { headers: getAuthHeaders() }
+      );
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch price history:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get portfolio value history (basic version)
+   */
+  async getPortfolioHistory(days: number = 7): Promise<PortfolioHistoryResponse> {
+    if (MOCK_MODE) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const now = Date.now() / 1000;
+      const values = Array.from({ length: days * 24 }, (_, i) => ({
+        timestamp: now - (days * 24 - i) * 3600,
+        value: 300 + Math.random() * 50
+      }));
+      return {
+        values,
+        current_value: 333.61,
+        period_change: -7.10,
+        period_change_percent: -2.08,
+        data_points: values.length,
+        metadata: {
+          earliest_wallet_date: "2024-12-18",
+          wallet_age_days: 9,
+          requested_days: days,
+          actual_days_shown: 9,
+          scope: "all_wallets",
+          scope_label: "Complete Portfolio",
+          disclaimer: "Portfolio values are approximations based on current holdings."
+        }
+      };
+    }
+
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/history/portfolio/history?days=${days}`,
+        {
+          method: "POST",
+          headers: getAuthHeaders()
+        }
+      );
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch portfolio history:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * ✅ UPDATED: Get detailed portfolio history with wallet filtering support
+   */
+  async getDetailedPortfolioHistory(
+    days: number = 7,
+    walletId: string | null = null  // ✅ NEW: Optional wallet ID for filtering
+  ): Promise<DetailedPortfolioHistoryResponse> {
+    if (MOCK_MODE) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const now = Date.now() / 1000;
+      const values = Array.from({ length: days * 24 }, (_, i) => ({
+        timestamp: now - (days * 24 - i) * 3600,
+        value: 300 + Math.random() * 50
+      }));
+      
+      return {
+        values,
+        current_value: 333.61,
+        period_change: -7.10,
+        period_change_percent: -2.08,
+        data_points: values.length,
+        wallet_events: [],
+        wallet_breakdown: [
+          {
+            wallet_id: "wallet1",
+            label: "Main Wallet",
+            chain: "aptos",
+            current_value: 333.61,
+            percentage: 100,
+            created_at: "2024-12-18",
+            age_days: 9
+          }
+        ],
+        metadata: {
+          earliest_wallet_date: "2024-12-18",
+          wallet_age_days: 9,
+          requested_days: days,
+          actual_days_shown: 9,
+          scope: walletId || "all_wallets",
+          scope_label: walletId ? "Specific Wallet" : "Complete Portfolio",
+          disclaimer: "Portfolio values based on current holdings × historical prices."
+        }
+      };
+    }
+
+    try {
+      // ✅ NEW: Build query params with optional wallet_id
+      const params = new URLSearchParams({
+        days: days.toString()
+      });
+      
+      if (walletId) {
+        params.append('wallet_id', walletId);
+      }
+      
+      const res = await fetch(
+        `${API_BASE_URL}/history/portfolio/detailed?${params.toString()}`,
+        {
+          method: "POST",
+          headers: getAuthHeaders()
+        }
+      );
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch detailed portfolio history:", error);
+      throw error;
+    }
+  },
 };
+
 
 // ============================================================
 // Type Definitions
@@ -594,7 +775,6 @@ export interface AuthResponse {
   token_type: string;
 }
 
-// OLD Wallet types (for backward compatibility with auth endpoints)
 export interface WalletInfo {
   address: string;
   name: string;
@@ -602,21 +782,19 @@ export interface WalletInfo {
   added_at?: string;
 }
 
-// NEW: Backend wallet response (from /v1/wallets)
 export interface WalletResponse {
   id: string;
+  _id?: string;  // ✅ ADDED: MongoDB ID (alias for id)
   user_id: string;
   address: string;
-  type: "petra" | "manual";
+  chain: "aptos" | "solana";
+  type: "petra" | "phantom" | "manual";
   label: string;
   is_primary: boolean;
   created_at: string;
 }
 
-// ============================================================
-// Phase 3: Enhanced Chat Types
-// ============================================================
-
+// Chat Types
 export interface WalletPortfolioResult {
   address: string;
   label: string;
@@ -645,10 +823,84 @@ export interface AggregatedPortfolio {
   }>;
 }
 
-// ✅ SINGLE ChatResponse interface (the new one)
 export interface ChatResponse {
   answer: string;
   portfolio: AggregatedPortfolio;
   wallet_results: WalletPortfolioResult[];
   scope_used: string;
+}
+
+// History Types
+export interface PricePoint {
+  timestamp: number;
+  price: number;
+}
+
+export interface PriceHistoryResponse {
+  symbol: string;
+  prices: PricePoint[];
+  current_price: number;
+  change_24h: number;
+  change_percent: number;
+  period_change: number;
+  period_change_percent: number;
+  data_points: number;
+}
+
+export interface PortfolioValuePoint {
+  timestamp: number;
+  value: number;
+}
+
+export interface PortfolioHistoryMetadata {
+  earliest_wallet_date: string;
+  wallet_age_days: number;
+  requested_days: number;
+  actual_days_shown: number;
+  scope: string;  // ✅ ADDED
+  scope_label: string;  // ✅ ADDED
+  disclaimer: string;
+}
+
+export interface PortfolioHistoryResponse {
+  values: PortfolioValuePoint[];
+  current_value: number;
+  period_change: number;
+  period_change_percent: number;
+  data_points: number;
+  metadata: PortfolioHistoryMetadata;
+}
+
+// Enhanced portfolio history types
+export interface WalletEvent {
+  date: string;
+  timestamp: number;
+  type: string;
+  wallet_id: string;
+  wallet_label: string;
+  wallet_chain: string;
+  value_before: number;
+  value_after: number;
+  impact: number;
+}
+
+export interface WalletBreakdown {
+  wallet_id: string;
+  label: string;
+  chain: string;
+  current_value: number;
+  percentage: number;
+  created_at: string;
+  age_days: number;
+}
+
+export interface DetailedPortfolioHistoryResponse {
+  values: PortfolioValuePoint[];
+  current_value: number;
+  period_change: number;
+  period_change_percent: number;
+  data_points: number;
+  wallet_events: WalletEvent[];
+  wallet_breakdown: WalletBreakdown[];
+  metadata: PortfolioHistoryMetadata;
 }

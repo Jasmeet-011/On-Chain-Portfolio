@@ -1,44 +1,68 @@
 # app/routers/portfolio.py
-from fastapi import APIRouter, Path
-from typing import List, Dict, Any
+from fastapi import APIRouter, Path, Query, HTTPException
+from typing import Dict, Any
 
-from .balances import get_balances
+from app.services.adapters import get_adapter_for_chain
+from app.deps import price_service
 
 router = APIRouter()
 
 
 @router.get("/wallets/{address}/portfolio")
-def get_portfolio(address: str = Path(..., min_length=3, max_length=200)) -> Dict[str, Any]:
+def get_portfolio(
+    address: str = Path(..., min_length=3, max_length=200),
+    chain: str = Query("aptos", description="Blockchain: aptos or solana")
+) -> Dict[str, Any]:
     """
-    Get complete portfolio with USD values for a wallet.
+    Get complete portfolio with USD values for a wallet on any chain.
+    
+    Args:
+        address: Wallet address
+        chain: Blockchain identifier ("aptos" or "solana")
+    
+    Returns:
+        Portfolio with balances and USD values
     """
-    # Get balances (this already includes usd_price and usd_value)
-    balances = get_balances(address)
-    
-    # Convert to dict format and calculate total
-    total_usd_value = 0.0
-    balance_list = []
-    
-    for balance in balances:
-        # Convert all Decimal values to float for JSON serialization
-        balance_dict = {
-            "symbol": balance.symbol,
-            "address": balance.address,
-            "decimals": balance.decimals,
-            "raw": balance.raw,
-            "amount": float(balance.amount) if balance.amount else 0.0,  # ← Convert Decimal to float
-            "usd_price": float(balance.usd_price) if balance.usd_price else None,
-            "usd_value": float(balance.usd_value) if balance.usd_value else None
-        }
+    try:
+        # Get the appropriate adapter for this chain
+        adapter = get_adapter_for_chain(chain)
         
-        balance_list.append(balance_dict)
+        # Fetch portfolio using adapter
+        portfolio = adapter.get_portfolio(address)
         
-        # Add to total if we have a USD value
-        if balance.usd_value is not None:
-            total_usd_value += float(balance.usd_value)
-    
-    return {
-        "address": address,
-        "balances": balance_list,
-        "total_usd_value": round(total_usd_value, 2)
-    }
+        # Add USD prices to each balance
+        total_usd_value = 0.0
+        
+        for balance in portfolio.get("balances", []):
+            symbol = balance.get("symbol")
+            amount = balance.get("amount", 0)
+            
+            if symbol:
+                # Fetch USD price for this token
+                usd_price = price_service.get_price(symbol, chain=chain)
+                
+                if usd_price:
+                    balance["usd_price"] = float(usd_price)
+                    balance["usd_value"] = float(amount) * float(usd_price)
+                    total_usd_value += balance["usd_value"]
+                else:
+                    balance["usd_price"] = None
+                    balance["usd_value"] = None
+        
+        # Add total USD value
+        portfolio["total_usd_value"] = round(total_usd_value, 2)
+        
+        return portfolio
+        
+    except ValueError as e:
+        # Chain not supported
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+    except Exception as e:
+        # Other errors
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to fetch portfolio: {str(e)}"
+        )

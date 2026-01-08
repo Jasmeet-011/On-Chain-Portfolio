@@ -43,7 +43,7 @@ def user_to_response(user: dict, user_id: str) -> UserResponse:
     Convert user document to UserResponse.
     
     Now fetches wallets from separate wallets collection
-    and returns WalletResponse objects (with 'label' field).
+    and returns WalletResponse objects (with 'chain' field).
     """
     # Fetch wallets from wallets collection
     wallets = list_user_wallets(user_id)
@@ -54,6 +54,7 @@ def user_to_response(user: dict, user_id: str) -> UserResponse:
             id=w["id"],
             user_id=w["user_id"],
             address=w["address"],
+            chain=w.get("chain", "aptos"),  # ← Include chain field
             type=w.get("type", "manual"),
             label=w.get("label", "Wallet"),
             is_primary=w.get("is_primary", False),
@@ -132,6 +133,7 @@ def get_me(current_user: dict = Depends(get_current_user)):
 
 # ============================================================
 # LEGACY: Single Wallet Endpoints (backward compatibility)
+# These endpoints default to Aptos for backward compatibility
 # ============================================================
 
 @router.put("/wallet", response_model=UserResponse)
@@ -144,6 +146,7 @@ def update_wallet_legacy(
     Use POST /v1/wallets instead for multi-wallet support.
     
     This endpoint now creates a wallet in the wallets collection.
+    Defaults to Aptos chain for backward compatibility.
     """
     user_id = str(current_user["_id"])
     
@@ -191,6 +194,7 @@ def disconnect_wallet_legacy(current_user: dict = Depends(get_current_user)):
 # LEGACY: Multiple Wallets Endpoints (DEPRECATED)
 # These endpoints still work but are DEPRECATED.
 # Use /v1/wallets endpoints instead.
+# Defaults to Aptos for backward compatibility.
 # ============================================================
 
 @router.get("/wallets", response_model=List[WalletResponse])
@@ -199,7 +203,7 @@ def get_wallets_legacy(current_user: dict = Depends(get_current_user)):
     DEPRECATED: Use GET /v1/wallets instead.
     
     Get all wallets for the authenticated user.
-    Returns list of wallet objects with address, label, and is_primary flag.
+    Returns list of wallet objects with address, chain, label, and is_primary flag.
     """
     user_id = str(current_user["_id"])
     wallets = list_user_wallets(user_id)
@@ -209,6 +213,7 @@ def get_wallets_legacy(current_user: dict = Depends(get_current_user)):
             id=w["id"],
             user_id=w["user_id"],
             address=w["address"],
+            chain=w.get("chain", "aptos"),  # ← Include chain
             type=w.get("type", "manual"),
             label=w.get("label", "Wallet"),
             is_primary=w.get("is_primary", False),
@@ -227,13 +232,16 @@ def add_wallet_legacy(
     DEPRECATED: Use POST /v1/wallets instead.
     
     Add a new wallet to authenticated user's account.
+    Defaults to Aptos chain for backward compatibility.
     """
     user_id = str(current_user["_id"])
     
     # Convert old "name" field to new "label" field
+    # Default to Aptos for backward compatibility
     wallet = create_wallet(
         user_id=user_id,
         address=payload.address,
+        chain="aptos",  # ← Default to Aptos for legacy endpoint
         wallet_type="manual",
         label=payload.name,  # ← Convert name to label
         is_primary=payload.is_primary

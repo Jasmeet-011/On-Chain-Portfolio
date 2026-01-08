@@ -2,166 +2,125 @@
 from typing import Optional, List, Dict, Any, Literal, Tuple
 from bson import ObjectId
 from datetime import datetime, timezone
-import re
 
 from .db import wallets_collection, users_collection
+from .adapters import get_adapter_for_chain
 
-WalletType = Literal["petra", "manual"]
+WalletType = Literal["petra", "phantom", "solflare", "manual"]
+ChainType = Literal["aptos", "solana"]
 
 # ============================================================
-# Wallet Validation
+# Wallet Validation (Multi-Chain)
 # ============================================================
 
-def validate_aptos_address_format(address: str) -> Tuple[bool, Optional[str]]:
+def validate_wallet_address(
+    address: str, 
+    chain: ChainType,
+    check_on_chain: bool = False
+) -> Tuple[bool, Optional[str]]:
     """
-    Validate Aptos address format (strict validation).
-    Returns: (is_valid, error_message)
-    
-    Rules:
-    - Must start with 0x
-    - Must contain only hexadecimal characters (0-9, a-f, A-F)
-    - Must be between 1-64 hex characters (after 0x)
-    - Accepts both short form (0x1) and long form (0x0000...0001)
-    """
-    if not address:
-        return False, "Address cannot be empty"
-    
-    # Remove whitespace
-    addr = address.strip()
-    
-    # Check 0x prefix
-    if not addr.lower().startswith("0x"):
-        return False, "Address must start with '0x'"
-    
-    # Extract hex part
-    hex_part = addr[2:]
-    
-    # Check length
-    if len(hex_part) == 0:
-        return False, "Address must have at least one character after '0x'"
-    
-    if len(hex_part) > 64:
-        return False, "Address cannot be longer than 64 hex characters (excluding '0x')"
-    
-    # Check if all characters are valid hex
-    if not re.match(r'^[0-9a-fA-F]+$', hex_part):
-        return False, "Address must contain only hexadecimal characters (0-9, a-f, A-F)"
-    
-    return True, None
-
-
-def validate_aptos_address_on_chain(address: str, aptos_client=None) -> Tuple[bool, Optional[str]]:
-    """
-    Check if address exists on Aptos blockchain.
-    Returns: (exists, error_message)
-    
-    Note: This is optional and requires an AptosClient instance.
-    """
-    if aptos_client is None:
-        # If no client provided, skip on-chain validation
-        return True, None
-    
-    try:
-        # Normalize address
-        normalized = normalize_address(address)
-        
-        # Try to fetch account resources
-        resources = aptos_client.get_account_resources(normalized)
-        
-        # If we get a list (even empty), account exists
-        # Note: New accounts exist but have no resources until first transaction
-        if isinstance(resources, list):
-            return True, None
-        
-        return False, "Address not found on Aptos blockchain"
-        
-    except Exception as e:
-        # If there's an error, log it but don't fail validation
-        # (Maybe node is down, network issue, etc.)
-        print(f"[WARN] Could not verify address on-chain: {e}")
-        return True, None  # Assume valid if we can't check
-
-
-def validate_aptos_address(address: str, check_on_chain: bool = False, aptos_client=None) -> Tuple[bool, Optional[str]]:
-    """
-    Complete address validation.
-    Returns: (is_valid, error_message)
+    Validate wallet address for specified chain.
     
     Args:
-        address: Aptos address to validate
-        check_on_chain: If True, verify address exists on blockchain
-        aptos_client: AptosClient instance (required if check_on_chain=True)
+        address: Wallet address
+        chain: Chain identifier ("aptos", "solana")
+        check_on_chain: Whether to verify address exists on blockchain
+    
+    Returns:
+        Tuple of (is_valid, error_message)
     """
-    # Step 1: Format validation (always required)
-    is_valid_format, format_error = validate_aptos_address_format(address)
-    if not is_valid_format:
-        return False, format_error
+    try:
+        # Get the appropriate adapter for this chain
+        adapter = get_adapter_for_chain(chain)
+        
+        # Step 1: Format validation
+        is_valid, error = adapter.validate_address(address)
+        if not is_valid:
+            return False, error
+        
+        # Step 2: On-chain verification (optional)
+        if check_on_chain:
+            exists, error = adapter.verify_on_chain(address)
+            if not exists:
+                return False, error or f"Address not found on {chain} blockchain"
+        
+        return True, None
     
-    # Step 2: On-chain validation (optional)
-    if check_on_chain:
-        exists_on_chain, chain_error = validate_aptos_address_on_chain(address, aptos_client)
-        if not exists_on_chain:
-            return False, chain_error or "Address not found on blockchain"
-    
-    return True, None
+    except Exception as e:
+        return False, f"Validation error: {str(e)}"
 
 
-def normalize_address(address: str) -> str:
-    """Normalize address to lowercase with 0x prefix."""
-    addr = address.lower().strip()
-    if not addr.startswith("0x"):
-        addr = "0x" + addr
-    return addr
+def normalize_wallet_address(address: str, chain: ChainType) -> str:
+    """
+    Normalize address for specified chain.
+    
+    Args:
+        address: Raw address
+        chain: Chain identifier
+    
+    Returns:
+        Normalized address
+    """
+    try:
+        adapter = get_adapter_for_chain(chain)
+        return adapter.normalize_address(address)
+    except Exception:
+        # Fallback to basic normalization
+        return address.strip()
 
 
 # ============================================================
-# Wallet CRUD Operations
+# Wallet CRUD Operations (Multi-Chain)
 # ============================================================
 
 def create_wallet(
     user_id: str,
     address: str,
+    chain: ChainType = "aptos",  # ← NEW: Chain parameter
     wallet_type: WalletType = "manual",
     label: str = "Main Wallet",
     is_primary: bool = False,
-    validate_on_chain: bool = False,
-    aptos_client=None
+    validate_on_chain: bool = False
 ) -> Optional[dict]:
     """
     Create a new wallet for a user.
-    Returns the created wallet document or None if failed.
     
     Args:
         user_id: User ID
         address: Wallet address
-        wallet_type: "petra" or "manual"
-        label: Display name for wallet (NOT "name")
+        chain: Blockchain ("aptos", "solana")  ← NEW
+        wallet_type: Wallet type ("petra", "phantom", "manual", etc.)
+        label: Display name
         is_primary: Whether this is the primary wallet
         validate_on_chain: If True, verify address exists on blockchain
-        aptos_client: AptosClient instance (required if validate_on_chain=True)
+    
+    Returns:
+        Created wallet document or None if failed
     """
     try:
-        # Step 1: Validate address format and optionally check on-chain
-        is_valid, error_msg = validate_aptos_address(
+        # Validate address
+        is_valid, error_msg = validate_wallet_address(
             address, 
-            check_on_chain=validate_on_chain,
-            aptos_client=aptos_client
+            chain,
+            check_on_chain=validate_on_chain
         )
         
         if not is_valid:
             print(f"[ERROR] Address validation failed: {error_msg}")
             return None
         
-        normalized_addr = normalize_address(address)
+        normalized_addr = normalize_wallet_address(address, chain)
         
-        # Check if wallet already exists for this user
+        # Check if wallet already exists for this user + chain
+        # ✅ IMPORTANT: Same address can exist on different chains!
         existing = wallets_collection.find_one({
             "user_id": user_id,
-            "address": normalized_addr
+            "address": normalized_addr,
+            "chain": chain  # ← NEW: Include chain in duplicate check
         })
         
         if existing:
-            print(f"[WARN] Wallet {normalized_addr} already exists for user {user_id}")
+            print(f"[WARN] Wallet {normalized_addr} on {chain} already exists for user {user_id}")
             return None
         
         # If this is the first wallet or is_primary=True, make it primary
@@ -179,8 +138,9 @@ def create_wallet(
         wallet_doc = {
             "user_id": user_id,
             "address": normalized_addr,
+            "chain": chain,  # ← NEW: Store chain
             "type": wallet_type,
-            "label": label,  # ✅ Uses "label" consistently
+            "label": label,
             "is_primary": is_primary,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
@@ -198,23 +158,37 @@ def create_wallet(
                 {"$set": {"wallet_address": normalized_addr}}
             )
         
-        print(f"[INFO] Created wallet {normalized_addr} for user {user_id}")
+        print(f"[INFO] Created {chain} wallet {normalized_addr} for user {user_id}")
         return wallet_doc
         
     except Exception as e:
         print(f"[ERROR] Failed to create wallet: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
-def list_user_wallets(user_id: str) -> List[Dict[str, Any]]:
+def list_user_wallets(user_id: str, chain: Optional[ChainType] = None) -> List[Dict[str, Any]]:
     """
-    Get all wallets for a user.
-    Returns list of wallet documents.
+    Get all wallets for a user, optionally filtered by chain.
+    
+    Args:
+        user_id: User ID
+        chain: Optional chain filter ("aptos", "solana", or None for all)
+    
+    Returns:
+        List of wallet documents
     """
     try:
-        wallets = list(wallets_collection.find({"user_id": user_id}))
+        query = {"user_id": user_id}
         
-        # Convert ObjectId to string for JSON serialization
+        # Add chain filter if specified
+        if chain:
+            query["chain"] = chain
+        
+        wallets = list(wallets_collection.find(query))
+        
+        # Convert ObjectId to string
         for wallet in wallets:
             wallet["id"] = str(wallet["_id"])
             del wallet["_id"]
@@ -238,14 +212,34 @@ def get_wallet_by_id(wallet_id: str) -> Optional[dict]:
         return None
 
 
-def get_wallet_by_address(user_id: str, address: str) -> Optional[dict]:
-    """Get a specific wallet by user_id and address."""
+def get_wallet_by_address(
+    user_id: str, 
+    address: str,
+    chain: Optional[ChainType] = None
+) -> Optional[dict]:
+    """
+    Get a specific wallet by user_id and address.
+    
+    Args:
+        user_id: User ID
+        address: Wallet address
+        chain: Optional chain (if None, searches all chains)
+    
+    Returns:
+        Wallet document or None
+    """
     try:
-        normalized_addr = normalize_address(address)
-        wallet = wallets_collection.find_one({
+        query = {
             "user_id": user_id,
-            "address": normalized_addr
-        })
+            "address": address  # Assume already normalized
+        }
+        
+        # Add chain to query if specified
+        if chain:
+            query["chain"] = chain
+        
+        wallet = wallets_collection.find_one(query)
+        
         if wallet:
             wallet["id"] = str(wallet["_id"])
             del wallet["_id"]
@@ -274,10 +268,9 @@ def get_primary_wallet(user_id: str) -> Optional[dict]:
 def update_wallet_label(user_id: str, address: str, new_label: str) -> bool:
     """Update the label/name of a wallet."""
     try:
-        normalized_addr = normalize_address(address)
         result = wallets_collection.update_one(
-            {"user_id": user_id, "address": normalized_addr},
-            {"$set": {"label": new_label}}  # ✅ Uses "label"
+            {"user_id": user_id, "address": address},
+            {"$set": {"label": new_label}}
         )
         return result.modified_count > 0 or result.matched_count > 0
     except Exception as e:
@@ -291,16 +284,14 @@ def set_primary_wallet(user_id: str, address: str) -> bool:
     Removes primary flag from all other wallets.
     """
     try:
-        normalized_addr = normalize_address(address)
-        
         # Check if wallet exists
         wallet = wallets_collection.find_one({
             "user_id": user_id,
-            "address": normalized_addr
+            "address": address
         })
         
         if not wallet:
-            print(f"[WARN] Wallet {normalized_addr} not found for user {user_id}")
+            print(f"[WARN] Wallet {address} not found for user {user_id}")
             return False
         
         # Remove primary from all wallets
@@ -311,17 +302,17 @@ def set_primary_wallet(user_id: str, address: str) -> bool:
         
         # Set this wallet as primary
         wallets_collection.update_one(
-            {"user_id": user_id, "address": normalized_addr},
+            {"user_id": user_id, "address": address},
             {"$set": {"is_primary": True}}
         )
         
         # Update user's legacy wallet_address field
         users_collection.update_one(
             {"_id": ObjectId(user_id)},
-            {"$set": {"wallet_address": normalized_addr}}
+            {"$set": {"wallet_address": address}}
         )
         
-        print(f"[INFO] Set {normalized_addr} as primary for user {user_id}")
+        print(f"[INFO] Set {address} as primary for user {user_id}")
         return True
         
     except Exception as e:
@@ -329,31 +320,36 @@ def set_primary_wallet(user_id: str, address: str) -> bool:
         return False
 
 
-def delete_wallet(user_id: str, address: str) -> bool:
+def delete_wallet(user_id: str, address: str, chain: Optional[ChainType] = None) -> bool:
     """
     Delete a wallet.
     If deleting the primary wallet, automatically sets the next wallet as primary.
+    
+    Args:
+        user_id: User ID
+        address: Wallet address
+        chain: Optional chain (if None, searches all chains)
     """
     try:
-        normalized_addr = normalize_address(address)
+        query = {
+            "user_id": user_id,
+            "address": address
+        }
+        
+        if chain:
+            query["chain"] = chain
         
         # Check if wallet exists and if it's primary
-        wallet = wallets_collection.find_one({
-            "user_id": user_id,
-            "address": normalized_addr
-        })
+        wallet = wallets_collection.find_one(query)
         
         if not wallet:
-            print(f"[WARN] Wallet {normalized_addr} not found for user {user_id}")
+            print(f"[WARN] Wallet {address} not found for user {user_id}")
             return False
         
         was_primary = wallet.get("is_primary", False)
         
         # Delete the wallet
-        result = wallets_collection.delete_one({
-            "user_id": user_id,
-            "address": normalized_addr
-        })
+        result = wallets_collection.delete_one(query)
         
         if result.deleted_count == 0:
             return False
@@ -372,7 +368,8 @@ def delete_wallet(user_id: str, address: str) -> bool:
                     {"$set": {"wallet_address": None}}
                 )
         
-        print(f"[INFO] Deleted wallet {normalized_addr} for user {user_id}")
+        chain_str = f" on {chain}" if chain else ""
+        print(f"[INFO] Deleted wallet {address}{chain_str} for user {user_id}")
         return True
         
     except Exception as e:
@@ -381,7 +378,7 @@ def delete_wallet(user_id: str, address: str) -> bool:
 
 
 def delete_all_user_wallets(user_id: str) -> bool:
-    """Delete all wallets for a user (e.g., account deletion)."""
+    """Delete all wallets for a user."""
     try:
         result = wallets_collection.delete_many({"user_id": user_id})
         
@@ -399,14 +396,38 @@ def delete_all_user_wallets(user_id: str) -> bool:
 
 
 # ============================================================
-# Migration Helper (Improved)
+# Multi-Chain Statistics
+# ============================================================
+
+def get_wallet_stats_by_chain(user_id: str) -> Dict[str, int]:
+    """
+    Get count of wallets per chain for a user.
+    
+    Returns:
+        Dict mapping chain to count (e.g., {"aptos": 3, "solana": 2})
+    """
+    try:
+        wallets = list_user_wallets(user_id)
+        
+        stats = {}
+        for wallet in wallets:
+            chain = wallet.get("chain", "aptos")  # Default to aptos for old wallets
+            stats[chain] = stats.get(chain, 0) + 1
+        
+        return stats
+    except Exception as e:
+        print(f"[ERROR] Failed to get wallet stats: {e}")
+        return {}
+
+
+# ============================================================
+# Migration Helper (Updated)
 # ============================================================
 
 def migrate_user_wallets(user_id: str) -> int:
     """
-    Migrate wallets from embedded array in user document to wallets collection.
-    Handles BOTH "name" and "label" fields for backward compatibility.
-    Returns number of wallets migrated.
+    Migrate wallets from embedded array to wallets collection.
+    Now adds chain="aptos" to all migrated wallets (assume Aptos for old data).
     """
     try:
         user = users_collection.find_one({"_id": ObjectId(user_id)})
@@ -427,29 +448,30 @@ def migrate_user_wallets(user_id: str) -> int:
             # Check if already migrated
             existing = wallets_collection.find_one({
                 "user_id": user_id,
-                "address": normalize_address(address)
+                "address": normalize_wallet_address(address, "aptos"),
+                "chain": "aptos"  # ← Assume Aptos for old wallets
             })
             
             if existing:
-                print(f"[INFO] Wallet {address} already migrated for user {user_id}")
                 continue
             
-            # Get label - try "label" first, fallback to "name"
+            # Get label
             label = wallet.get("label") or wallet.get("name") or "Wallet"
             
-            # Create wallet in new collection
+            # Create wallet with chain="aptos"
             result = create_wallet(
                 user_id=user_id,
                 address=address,
-                wallet_type="manual",  # Assume manual for old wallets
-                label=label,  # ✅ Always stores as "label"
+                chain="aptos",  # ← All old wallets are Aptos
+                wallet_type="manual",
+                label=label,
                 is_primary=wallet.get("is_primary", False)
             )
             
             if result:
                 migrated_count += 1
         
-        # Clear embedded wallets array after successful migration
+        # Clear embedded wallets after migration
         if migrated_count > 0:
             users_collection.update_one(
                 {"_id": ObjectId(user_id)},
@@ -465,10 +487,7 @@ def migrate_user_wallets(user_id: str) -> int:
 
 
 def migrate_all_users() -> Dict[str, int]:
-    """
-    Migrate wallets for ALL users in database.
-    Returns statistics.
-    """
+    """Migrate wallets for ALL users."""
     try:
         users = users_collection.find({})
         
@@ -482,11 +501,8 @@ def migrate_all_users() -> Dict[str, int]:
             stats["total_users"] += 1
             user_id = str(user["_id"])
             
-            # Check if user has embedded wallets
             if user.get("wallets"):
                 stats["users_with_wallets"] += 1
-                
-                # Migrate this user's wallets
                 migrated = migrate_user_wallets(user_id)
                 stats["total_wallets_migrated"] += migrated
         

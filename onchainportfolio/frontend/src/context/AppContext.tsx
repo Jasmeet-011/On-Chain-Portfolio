@@ -1,4 +1,4 @@
-// src/context/AppContext.tsx
+// src/context/AppContext.tsx - MULTI-CHAIN SUPPORT
 import React, {
   createContext,
   useContext,
@@ -8,17 +8,19 @@ import React, {
 } from "react";
 import type { ReactNode } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
+import { useSolanaWallet } from "./SolanaWalletProvider"; // ✅ NEW: Solana wallet
 import { api } from "../api";
 import type { WalletResponse } from "../api";
 
 export type Theme = "light" | "dark";
 
-// Extended WalletInfo to track source
+// ✅ UPDATED: Extended WalletInfo with chain support
 export interface ExtendedWalletInfo {
   id: string;
   address: string;
   label: string;
-  type: 'manual' | 'petra';
+  type: 'manual' | 'petra' | 'phantom'; // ✅ UPDATED: Added phantom
+  chain: 'aptos' | 'solana'; // ✅ NEW: Chain field
   is_primary: boolean;
   created_at: string;
   publicKey?: string; // For locally tracking connected wallet keys
@@ -39,11 +41,11 @@ export interface AppContextType {
   setWallets: (wallets: ExtendedWalletInfo[]) => void;
   activeWallet: ExtendedWalletInfo | null;
   setActiveWallet: (wallet: ExtendedWalletInfo | null) => void;
-  addWallet: (address: string, label: string, isPrimary?: boolean, type?: 'manual' | 'petra', publicKey?: string) => Promise<void>;
+  addWallet: (address: string, label: string, isPrimary?: boolean, type?: 'manual' | 'petra' | 'phantom', chain?: 'aptos' | 'solana', publicKey?: string) => Promise<void>;
   removeWallet: (address: string) => Promise<void>;
   updateWalletName: (address: string, label: string) => Promise<void>;
   setPrimaryWallet: (address: string) => Promise<void>;
-  connectWallet: (walletName: string) => Promise<void>;
+  connectWallet: (walletName: string, chain: 'aptos' | 'solana') => Promise<void>; // ✅ UPDATED: Added chain parameter
   disconnectConnectedWallet: (address: string) => Promise<void>;
   availableWallets: readonly any[];
   isWalletConnecting: boolean;
@@ -88,13 +90,14 @@ export const useAppContext = () => {
   return ctx;
 };
 
-// Helper to convert backend wallet to ExtendedWalletInfo
+// ✅ UPDATED: Helper to convert backend wallet to ExtendedWalletInfo (now includes chain)
 function toExtendedWallet(wallet: WalletResponse, publicKey?: string): ExtendedWalletInfo {
   return {
     id: wallet.id,
     address: wallet.address,
     label: wallet.label,
     type: wallet.type,
+    chain: wallet.chain, // ✅ NEW: Chain from backend
     is_primary: wallet.is_primary,
     created_at: wallet.created_at,
     publicKey,
@@ -130,15 +133,23 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isWalletConnecting, setIsWalletConnecting] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
 
-  // Get wallet adapter hooks
+  // ✅ Get Aptos wallet adapter hooks
   const {
-    connect: adapterConnect,
-    disconnect: adapterDisconnect,
-    account,
-    connected,
-    wallet: connectedWallet,
-    wallets: adapterWallets,
+    connect: aptosConnect,
+    disconnect: aptosDisconnect,
+    account: aptosAccount,
+    connected: aptosConnected,
+    wallet: aptosConnectedWallet,
+    wallets: aptosWallets,
   } = useWallet();
+
+  // ✅ NEW: Get Solana wallet hooks
+  const {
+    connect: solanaConnect,
+    disconnect: solanaDisconnect,
+    publicKey: solanaPublicKey,
+    connected: solanaConnected,
+  } = useSolanaWallet();
 
   const clearWalletError = useCallback(() => setWalletError(null), []);
 
@@ -162,13 +173,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Connect wallet using adapter
-  const connectWallet = async (walletName: string) => {
+  // ✅ UPDATED: Connect wallet with chain parameter
+  const connectWallet = async (walletName: string, chain: 'aptos' | 'solana') => {
     setIsWalletConnecting(true);
     setWalletError(null);
 
     try {
-      await adapterConnect(walletName as any);
+      if (chain === 'aptos') {
+        // Connect Aptos wallet (Petra, etc.)
+        await aptosConnect(walletName as any);
+      } else if (chain === 'solana') {
+        // Connect Solana wallet (Phantom)
+        await solanaConnect();
+      }
     } catch (error: any) {
       console.error("[AppContext] Failed to connect wallet:", error);
       
@@ -184,58 +201,104 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Handle wallet connection state changes - ONLY if user is logged in
+  // ✅ Handle Aptos wallet connection
   useEffect(() => {
-    // IMPORTANT: Don't auto-add wallets if user is not logged in
     if (!currentUser) {
-      console.log("[AppContext] User not logged in, skipping wallet auto-add");
+      console.log("[AppContext] User not logged in, skipping Aptos wallet auto-add");
       return;
     }
 
-    if (connected && account?.address && connectedWallet) {
-      const addressStr = account.address.toString();
+    if (aptosConnected && aptosAccount?.address && aptosConnectedWallet) {
+      const addressStr = aptosAccount.address.toString();
       const existingWallet = wallets.find(w => 
-        w.address.toLowerCase() === addressStr.toLowerCase()
+        w.address.toLowerCase() === addressStr.toLowerCase() && w.chain === 'aptos'
       );
 
       if (!existingWallet) {
         let publicKeyStr: string | undefined;
-        if (account.publicKey) {
-          if (Array.isArray(account.publicKey)) {
-            publicKeyStr = account.publicKey[0]?.toString();
+        if (aptosAccount.publicKey) {
+          if (Array.isArray(aptosAccount.publicKey)) {
+            publicKeyStr = aptosAccount.publicKey[0]?.toString();
           } else {
-            publicKeyStr = account.publicKey.toString();
+            publicKeyStr = aptosAccount.publicKey.toString();
           }
         }
 
-        // Add wallet via API
+        // Add Aptos wallet via API
         addWallet(
           addressStr,
-          `${connectedWallet.name} Wallet`,
+          `${aptosConnectedWallet.name} Wallet`,
           wallets.length === 0,
           'petra',
+          'aptos', // ✅ Specify chain
           publicKeyStr
         ).catch(err => {
-          console.error("[AppContext] Failed to add connected wallet:", err);
+          console.error("[AppContext] Failed to add Aptos wallet:", err);
           setWalletError("Failed to save wallet to account");
         });
       } else if (!activeWallet || activeWallet.address !== addressStr) {
         setActiveWallet(existingWallet);
       }
     }
-  }, [connected, account, connectedWallet, currentUser]);
+  }, [aptosConnected, aptosAccount, aptosConnectedWallet, currentUser]);
+
+  // ✅ NEW: Handle Solana wallet connection
+  useEffect(() => {
+    if (!currentUser) {
+      console.log("[AppContext] User not logged in, skipping Solana wallet auto-add");
+      return;
+    }
+
+    if (solanaConnected && solanaPublicKey) {
+      const addressStr = solanaPublicKey;
+      const existingWallet = wallets.find(w => 
+        w.address.toLowerCase() === addressStr.toLowerCase() && w.chain === 'solana'
+      );
+
+      if (!existingWallet) {
+        // Add Solana wallet via API
+         const timer = setTimeout(() => {
+        addWallet(
+          addressStr,
+          "Phantom Wallet",
+          wallets.length === 0,
+          'phantom',
+          'solana',
+          solanaPublicKey
+        ).catch(err => {
+          console.error("[AppContext] Failed to add Solana wallet:", err);
+          setWalletError("Failed to save wallet to account");
+        });
+      }, 100);
+      return () => clearTimeout(timer);
+      } else if (!activeWallet || activeWallet.address !== addressStr) {
+        setActiveWallet(existingWallet);
+      }
+    }
+  }, [solanaConnected, solanaPublicKey, currentUser?.id,wallets.length]);
 
   // Disconnect a connected wallet
   const disconnectConnectedWallet = async (address: string) => {
     const walletToDisconnect = wallets.find(w => w.address === address);
     
-    if (walletToDisconnect && walletToDisconnect.type === 'petra') {
-      const currentAddress = account?.address?.toString();
-      if (currentAddress?.toLowerCase() === address.toLowerCase()) {
-        try {
-          await adapterDisconnect();
-        } catch (error) {
-          console.error("[AppContext] Error disconnecting from adapter:", error);
+    if (walletToDisconnect) {
+      // Disconnect from appropriate adapter
+      if (walletToDisconnect.chain === 'aptos' && walletToDisconnect.type === 'petra') {
+        const currentAddress = aptosAccount?.address?.toString();
+        if (currentAddress?.toLowerCase() === address.toLowerCase()) {
+          try {
+            await aptosDisconnect();
+          } catch (error) {
+            console.error("[AppContext] Error disconnecting from Aptos adapter:", error);
+          }
+        }
+      } else if (walletToDisconnect.chain === 'solana' && walletToDisconnect.type === 'phantom') {
+        if (solanaPublicKey?.toLowerCase() === address.toLowerCase()) {
+          try {
+            await solanaDisconnect();
+          } catch (error) {
+            console.error("[AppContext] Error disconnecting from Solana adapter:", error);
+          }
         }
       }
     }
@@ -243,16 +306,21 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     await removeWallet(address);
   };
 
+  // ✅ UPDATED: Add wallet with chain parameter
   const addWallet = async (
     address: string, 
     label: string, 
     isPrimary: boolean = false,
-    type: 'manual' | 'petra' = 'manual',
+    type: 'manual' | 'petra' | 'phantom' = 'manual',
+    chain: 'aptos' | 'solana' = 'aptos', // ✅ NEW PARAMETER
     publicKey?: string
   ) => {
-    // Check if wallet already exists
-    if (wallets.some(w => w.address.toLowerCase() === address.toLowerCase())) {
-      throw new Error("Wallet already exists");
+    // Check if wallet already exists (same address AND same chain)
+    if (wallets.some(w => 
+      w.address.toLowerCase() === address.toLowerCase() && 
+      w.chain === chain
+    )) {
+      throw new Error("Wallet already exists on this chain");
     }
 
     // If not logged in, store locally (for backward compatibility)
@@ -262,6 +330,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         address,
         label,
         type,
+        chain, // ✅ NEW
         is_primary: isPrimary || wallets.length === 0,
         created_at: new Date().toISOString(),
         publicKey,
@@ -284,8 +353,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     // Add to backend
     try {
-      console.log("[AppContext] Adding wallet to backend:", { address, label, type });
-      const newWallet = await api.addWallet(address, label, type, isPrimary);
+      console.log("[AppContext] Adding wallet to backend:", { address, label, type, chain });
+      const newWallet = await api.addWallet(address, label, type, isPrimary, chain); // ✅ Pass chain
       
       // Reload all wallets to get updated state
       await loadWallets();
@@ -384,7 +453,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // Load wallets from backend
+  // ✅ Load wallets from backend (now includes chain field)
   const loadWallets = async () => {
     if (!currentUser) return;
 
@@ -424,19 +493,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setMessages([]);
   };
 
-  // Logout function - ✅ FIXED: Proper async handling
+  // Logout function - Proper async handling
   const logout = useCallback(() => {
     console.log("[AppContext] Logging out user");
     
-    // Disconnect wallet adapter FIRST (before clearing state)
-    if (connected) {
+    // Disconnect wallet adapters FIRST (before clearing state)
+    if (aptosConnected) {
       try {
-        // Wrap in Promise.resolve to handle both sync and async disconnect
-        Promise.resolve(adapterDisconnect()).catch(err => 
-          console.error("[AppContext] Error disconnecting adapter:", err)
+        Promise.resolve(aptosDisconnect()).catch(err => 
+          console.error("[AppContext] Error disconnecting Aptos adapter:", err)
         );
       } catch (err) {
-        console.error("[AppContext] Error disconnecting adapter:", err);
+        console.error("[AppContext] Error disconnecting Aptos adapter:", err);
+      }
+    }
+
+    if (solanaConnected) {
+      try {
+        Promise.resolve(solanaDisconnect()).catch(err => 
+          console.error("[AppContext] Error disconnecting Solana adapter:", err)
+        );
+      } catch (err) {
+        console.error("[AppContext] Error disconnecting Solana adapter:", err);
       }
     }
     
@@ -450,7 +528,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     localStorage.removeItem("walletAddress");
     
     console.log("[AppContext] Logout complete");
-  }, [connected, adapterDisconnect, setCurrentUser]);
+  }, [aptosConnected, solanaConnected, aptosDisconnect, solanaDisconnect, setCurrentUser]);
 
   // Load wallets on mount or when user changes
   useEffect(() => {
@@ -464,7 +542,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         const stored = localStorage.getItem("wallets");
         if (stored) {
           try {
-            const parsedWallets: ExtendedWalletInfo[] = JSON.parse(stored);
+            // ✅ FIX: Migrate old wallets without chain field
+            const parsedWallets: ExtendedWalletInfo[] = JSON.parse(stored).map((w: any) => ({
+              ...w,
+              chain: w.chain || 'aptos', // Default to aptos if missing
+              type: w.type || 'manual' // Default to manual if missing
+            }));
+            
             setWallets(parsedWallets);
 
             const activeAddr = localStorage.getItem("activeWalletAddress");
@@ -476,6 +560,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             } else if (parsedWallets.length > 0) {
               setActiveWallet(parsedWallets[0]);
             }
+            
+            // ✅ Save migrated wallets back to localStorage
+            localStorage.setItem("wallets", JSON.stringify(parsedWallets));
           } catch (error) {
             console.error("[AppContext] Failed to parse stored wallets:", error);
           }
@@ -505,7 +592,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setPrimaryWallet,
     connectWallet,
     disconnectConnectedWallet,
-    availableWallets: adapterWallets || [],
+    availableWallets: aptosWallets || [], // Could combine with Solana wallets
     isWalletConnecting,
     walletError,
     clearWalletError,

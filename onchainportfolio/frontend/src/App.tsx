@@ -1,14 +1,77 @@
-// src/App.tsx - CONSISTENT COLOR THEME (Blue Only)
-import React, { useState } from "react";
+// src/App.tsx - UPDATED: Added Toast Notifications Support
+import React, { useState, useEffect } from "react";
+import { Toaster } from "react-hot-toast";
+import { WalletProvider } from "./context/WalletProvider";
+import { SolanaWalletProvider } from "./context/SolanaWalletProvider";
 import { AppProvider, useAppContext } from "./context/AppContext";
+import Sidebar, { type TabType } from "./components/Sidebar";
 import Header from "./components/Header";
+
+import HomePage from "./pages/HomePage";
+import AnalyticsPage from "./pages/AnalyticsPage";
+import TransactionsPage from "./pages/TransactionsPage";
 import ChatPage from "./pages/ChatPage";
-import DashboardPage from "./pages/DashboardPage";
+import AlertsPage from "./pages/AlertsPage";
 import SignInPage from "./pages/SignInPage";
 import SignUpPage from "./pages/SignUpPage";
 
-const AppShell: React.FC = () => {
+// ✅ Toast Configuration Component (inside AppProvider for theme access)
+const ToastConfig: React.FC = () => {
   const { theme } = useAppContext();
+
+  return (
+    <Toaster
+      position="top-center"
+      reverseOrder={false}
+      gutter={8}
+      toastOptions={{
+        duration: 4000,
+        style: {
+          background: theme === 'dark' ? '#18181b' : '#ffffff',
+          color: theme === 'dark' ? '#fafafa' : '#18181b',
+          border: theme === 'dark' ? '1px solid #3f3f46' : '1px solid #e5e7eb',
+          padding: '12px 16px',
+          borderRadius: '12px',
+          fontSize: '14px',
+          fontWeight: '500',
+          boxShadow: theme === 'dark'
+            ? '0 10px 40px rgba(0, 0, 0, 0.4)'
+            : '0 10px 40px rgba(0, 0, 0, 0.1)',
+        },
+        success: {
+          duration: 3000,
+          iconTheme: {
+            primary: '#10b981',
+            secondary: theme === 'dark' ? '#18181b' : '#ffffff',
+          },
+          style: {
+            border: theme === 'dark' ? '1px solid #10b981' : '1px solid #10b981',
+          },
+        },
+        error: {
+          duration: 5000,
+          iconTheme: {
+            primary: '#ef4444',
+            secondary: theme === 'dark' ? '#18181b' : '#ffffff',
+          },
+          style: {
+            border: theme === 'dark' ? '1px solid #ef4444' : '1px solid #ef4444',
+          },
+        },
+        loading: {
+          duration: Infinity,
+          style: {
+            background: theme === 'dark' ? '#18181b' : '#ffffff',
+            color: theme === 'dark' ? '#a1a1aa' : '#71717a',
+          },
+        },
+      }}
+    />
+  );
+};
+
+const AppShell: React.FC = () => {
+  const { theme, currentUser, setCurrentUser, logout } = useAppContext();
 
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -17,94 +80,172 @@ const AppShell: React.FC = () => {
   });
 
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
-  const [activeTab, setActiveTab] = useState<"dashboard" | "chat">("dashboard");
+  const [activeTab, setActiveTab] = useState<TabType>("home");
+
+  // Sidebar collapse state (responsive: collapsed on mobile by default)
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth < 1024;
+  });
+
+  // Load user from localStorage on mount
+  useEffect(() => {
+    const storedUser = localStorage.getItem("user");
+    if (storedUser && !currentUser) {
+      try {
+        const user = JSON.parse(storedUser);
+        setCurrentUser({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+        });
+        setIsAuthenticated(true);
+      } catch (error) {
+        console.error("Failed to parse stored user:", error);
+        localStorage.removeItem("user");
+        setIsAuthenticated(false);
+      }
+    }
+  }, []);
+
+  // Handle window resize for responsive sidebar
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 1024) {
+        setIsSidebarCollapsed(true);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem("user");
+    logout();
     setIsAuthenticated(false);
     setAuthMode("signin");
+    setActiveTab("home");
+  };
+
+  const handleTabChange = (tab: TabType) => {
+    setActiveTab(tab);
+
+    // Auto-collapse sidebar on mobile after navigation
+    if (window.innerWidth < 1024) {
+      setIsSidebarCollapsed(true);
+    }
   };
 
   // Auth screens
   if (!isAuthenticated) {
     if (authMode === "signin") {
       return (
-        <SignInPage
-          onSwitchToSignUp={() => setAuthMode("signup")}
-          onSignedIn={() => {
-            setIsAuthenticated(true);
-            setActiveTab("dashboard");
-          }}
-        />
+        <>
+          <ToastConfig />
+          <SignInPage
+            onSwitchToSignUp={() => setAuthMode("signup")}
+            onSignedIn={() => {
+              setIsAuthenticated(true);
+              setActiveTab("home");
+            }}
+          />
+        </>
       );
     }
 
     return (
-      <SignUpPage
-        onSwitchToSignIn={() => setAuthMode("signin")}
-        onSignedUp={() => {
-          setIsAuthenticated(true);
-          setActiveTab("dashboard");
-        }}
-      />
+      <>
+        <ToastConfig />
+        <SignUpPage
+          onSwitchToSignIn={() => setAuthMode("signin")}
+          onSignedUp={() => {
+            setIsAuthenticated(true);
+            setActiveTab("home");
+          }}
+        />
+      </>
     );
   }
 
-  // Main app
+  // Main app with sidebar layout
   return (
     <div
-      className={`min-h-screen ${
-        theme === "dark"
-          ? "bg-slate-900"
-          : "bg-slate-50"
-      }`}
+      className={`min-h-screen transition-colors duration-200 ${theme === "dark" ? "bg-zinc-950" : "bg-slate-50"
+        }`}
     >
-      <Header onLogout={handleLogout} />
+      {/* ✅ Toast Notifications */}
+      <ToastConfig />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Navigation Tabs - CONSISTENT BLUE */}
-        <div className={`inline-flex rounded-lg p-1 mb-6 ${
-          theme === "dark" ? "bg-slate-800 border border-slate-700" : "bg-white border border-slate-200 shadow-sm"
-        }`}>
-          <button
-            onClick={() => setActiveTab("dashboard")}
-            className={`px-6 py-2.5 rounded-md text-sm font-medium transition-colors ${
-              activeTab === "dashboard"
-                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                : theme === "dark"
-                ? "text-slate-400 hover:text-white hover:bg-slate-700"
-                : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-            }`}
-          >
-            <span className="mr-2">📊</span>
-            Dashboard
-          </button>
-          <button
-            onClick={() => setActiveTab("chat")}
-            className={`px-6 py-2.5 rounded-md text-sm font-medium transition-colors ${
-              activeTab === "chat"
-                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                : theme === "dark"
-                ? "text-slate-400 hover:text-white hover:bg-slate-700"
-                : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-            }`}
-          >
-            <span className="mr-2">💬</span>
-            AI Assistant
-          </button>
-        </div>
+      {/* Sidebar Navigation */}
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+      />
+
+      {/* Main Content Area */}
+      <div
+        className={`transition-all duration-300 ${isSidebarCollapsed ? "lg:ml-20" : "lg:ml-64"
+          }`}
+      >
+        {/* Header */}
+        <Header onLogout={handleLogout} />
 
         {/* Page Content */}
-        {activeTab === "dashboard" ? <DashboardPage /> : <ChatPage />}
-      </main>
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          {activeTab === "home" && <HomePage onNavigateToAnalytics={() => setActiveTab('analytics')} />}
+          {activeTab === "analytics" && <AnalyticsPage />}
+          {activeTab === "transactions" && <TransactionsPage />}
+          {activeTab === "alerts" && <AlertsPage />}
+          {activeTab === "chat" && <ChatPage />}
+        </main>
+      </div>
+
+      {/* Mobile Menu Button - Fixed position on mobile */}
+      <button
+        onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+        className={`fixed bottom-6 right-6 lg:hidden z-50 p-4 rounded-full shadow-lg transition-colors ${theme === "dark"
+            ? "bg-blue-600 text-white hover:bg-blue-700"
+            : "bg-blue-600 text-white hover:bg-blue-700"
+          }`}
+      >
+        <svg
+          className="w-6 h-6"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          {isSidebarCollapsed ? (
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 6h16M4 12h16M4 18h16"
+            />
+          ) : (
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          )}
+        </svg>
+      </button>
     </div>
   );
 };
 
+// Correct provider nesting order
 const App: React.FC = () => (
-  <AppProvider>
-    <AppShell />
-  </AppProvider>
+  <WalletProvider>
+    <SolanaWalletProvider>
+      <AppProvider>
+        <AppShell />
+      </AppProvider>
+    </SolanaWalletProvider>
+  </WalletProvider>
 );
 
 export default App;

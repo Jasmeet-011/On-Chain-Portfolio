@@ -3,35 +3,34 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import health, balances, prices, portfolio, chat, transactions
+from .routers import health, balances, prices, portfolio, chat, transactions, history, alerts ,nfts, insights
 from .routers.auth import router as auth_router
 from .routers.wallets import router as wallets_router
-from .services.db import setup_indexes  # This will now work with fixed db.py
+from .services.db import setup_indexes
 from .services.wallet_service import migrate_all_users
 
 app = FastAPI(
     title="On-Chain Portfolio API",
-    version="0.3.0",
-    description="Multi-wallet portfolio tracker for Aptos blockchain"
+    version="0.4.0",
+    description="Multi-chain portfolio tracker with price alerts"
 )
 
 # ============================================================
-# Startup Event - Database Setup & Migration
+# Startup Event - Database, Migration & Alert System
 # ============================================================
 
 @app.on_event("startup")
 async def startup_event():
-    """Run database setup and migrations on app startup."""
+    """Run database setup, migrations, and initialize alert system on app startup."""
     print("\n" + "=" * 60)
     print("🚀 STARTING CHAINIQ BACKEND")
     print("=" * 60)
     
-    # Step 1: Database connection is already established in db.py
-    # The indexes are created automatically when db.py imports
+    # Database connection and indexes (auto-created in db.py)
     print("\n[STARTUP] ✅ Database connected")
     print("[STARTUP] ✅ Indexes created")
     
-    # Step 2: Migrate existing users' wallets
+    # Migrate existing users' wallets
     print("\n[STARTUP] 🔄 Migrating embedded wallets to collection...")
     try:
         migration_stats = migrate_all_users()
@@ -47,12 +46,41 @@ async def startup_event():
         print(f"[STARTUP] ⚠️  Migration failed: {e}")
         print("[STARTUP] App will continue but embedded wallets may not work correctly")
     
+    # Initialize Alert System
+    print("\n[STARTUP] 🔔 Initializing alert system...")
+    try:
+        from app.deps import get_alert_service
+        from app.services.scheduler import AlertScheduler
+        
+        alert_service = get_alert_service()
+        scheduler = AlertScheduler(alert_service)
+        scheduler.start()
+        
+        # Store in app state for access in endpoints
+        app.state.alert_service = alert_service
+        app.state.scheduler = scheduler
+        
+        print("[STARTUP] ✅ Alert system initialized")
+        print("[STARTUP] ✅ Scheduler started (checks every 5 minutes)")
+    except Exception as e:
+        print(f"[STARTUP] ⚠️  Alert system failed to start: {e}")
+        print("[STARTUP] App will continue but alerts will not work")
+    
     print("\n" + "=" * 60)
     print("✅ APPLICATION READY!")
     print("=" * 60)
     print("📚 API Docs: http://localhost:8000/docs")
     print("💚 Health Check: http://localhost:8000/health")
+    print("🔔 Alerts: http://localhost:8000/v1/alerts")
     print("=" * 60 + "\n")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    if hasattr(app.state, "scheduler"):
+        app.state.scheduler.stop()
+    print("[SHUTDOWN] ✅ Alert system stopped")
 
 # ============================================================
 # CORS Middleware
@@ -63,7 +91,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://*.vercel.app",  # For deployment
+        "https://*.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -85,21 +113,19 @@ app.include_router(prices.router, prefix="/v1", tags=["prices"])
 app.include_router(portfolio.router, prefix="/v1", tags=["portfolio"])
 app.include_router(chat.router, prefix="/v1", tags=["chat"])
 app.include_router(transactions.router, prefix="/v1", tags=["transactions"])
-
+app.include_router(history.router, prefix="/v1/history", tags=["history"])
+app.include_router(alerts.router, prefix="/v1/alerts", tags=["alerts"])
+app.include_router(nfts.router, prefix="/v1/nfts", tags=["nfts"]) 
+app.include_router(insights.router, prefix="/v1/insights", tags=["insights"])
 # ============================================================
-# Authentication Endpoints
+# Authentication & Wallet Management
 # ============================================================
 
 app.include_router(auth_router)
-
-# ============================================================
-# Wallet Management Endpoints
-# ============================================================
-
 app.include_router(wallets_router, prefix="/v1")
 
 # ============================================================
-# Root Redirect
+# Root & Info
 # ============================================================
 
 @app.get("/", include_in_schema=False)
@@ -107,30 +133,33 @@ def root():
     """Redirect root to API documentation"""
     return RedirectResponse(url="/docs")
 
-# ============================================================
-# Additional Info Endpoint
-# ============================================================
 
 @app.get("/info", tags=["info"])
 def get_info():
     """Get API information and endpoints"""
     return {
         "name": "On-Chain Portfolio API",
-        "version": "0.3.0",
-        "description": "Multi-wallet portfolio tracker for Aptos blockchain",
+        "version": "0.4.0",
+        "description": "Multi-chain portfolio tracker with price alerts",
         "features": [
             "JWT Authentication",
+            "Multi-chain support (Aptos, Solana)",
             "Multiple wallet management",
             "Portfolio aggregation across wallets",
             "AI-powered portfolio chat",
             "Transaction history with filters",
-            "Real-time token prices"
+            "Real-time token prices",
+            "Historical charts",
+            "Price alerts with email notifications"
         ],
         "endpoints": {
             "auth": "/auth",
             "wallets": "/v1/wallets",
             "chat": "/v1/chat",
+            "portfolio": "/v1/portfolio",
             "transactions": "/v1/wallets/{address}/transactions",
+            "history": "/v1/history",
+            "alerts": "/v1/alerts",
             "docs": "/docs",
             "redoc": "/redoc"
         }

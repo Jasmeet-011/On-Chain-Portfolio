@@ -1,197 +1,327 @@
-import React from "react";
+// src/components/TransactionDetailModal.tsx - PROFESSIONAL: Black/White/Gray Theme
+import React, { useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
-// import { shortenAddress } from "../utils";
-
-interface Transaction {
-  hash: string;
-  version: string;
-  success: boolean;
-  timestamp: string;
-  gas_used: number;
-  sender: string;
-  type: string;
-  category: string;
-  function?: string;
-  details: Record<string, any>;
-}
+import { api } from "../api";
+import { shortenAddress } from "../utils";
+import { CheckCircle2, XCircle, Copy, ExternalLink, AlertTriangle, RefreshCw, X } from "lucide-react";
 
 interface Props {
-  transaction: Transaction;
+  isOpen: boolean;
   onClose: () => void;
+  txHash: string;
+  address: string;
+  chain: 'aptos' | 'solana';
 }
 
-const TransactionDetailModal: React.FC<Props> = ({ transaction, onClose }) => {
-  const { theme } = useAppContext();
+const CHAIN_CONFIG = {
+  aptos: { 
+    name: "APTOS", 
+    emoji: "⬢", 
+    explorer: "https://explorer.aptoslabs.com/txn"
+  },
+  solana: { 
+    name: "SOLANA", 
+    emoji: "◎", 
+    explorer: "https://explorer.solana.com/tx"
+  },
+};
 
-  const formatDate = (timestamp: string) => {
+const TransactionDetailModal: React.FC<Props> = ({ isOpen, onClose, txHash, address, chain }) => {
+  const { theme } = useAppContext();
+  const [txDetail, setTxDetail] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && txHash) {
+      loadTransactionDetail();
+    }
+  }, [isOpen, txHash, chain]);
+
+  const loadTransactionDetail = async () => {
+    setLoading(true);
+    setError(null);
+
     try {
-      const tsMicro = parseInt(timestamp);
-      const tsSec = tsMicro / 1_000_000;
-      const date = new Date(tsSec * 1000);
-      return date.toLocaleString();
-    } catch {
-      return timestamp;
+      const detail = await api.getTransactionDetail(address, txHash, chain);
+      setTxDetail(detail);
+    } catch (err: any) {
+      console.error("Failed to load transaction detail:", err);
+      setError(err.message || "Failed to load transaction details");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const openExplorer = () => {
-    window.open(`https://explorer.aptoslabs.com/txn/${transaction.hash}?network=testnet`, "_blank");
+  if (!isOpen) return null;
+
+  const formatTimestamp = (timestamp: string) => {
+    const date = new Date(parseInt(timestamp) / 1000);
+    return date.toLocaleString();
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const getExplorerUrl = () => {
+    const config = CHAIN_CONFIG[chain];
+    return `${config.explorer}/${txHash}`;
+  };
+
+  const getChainBadge = () => {
+    const config = CHAIN_CONFIG[chain];
+    
+    return (
+      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border ${
+        theme === "dark" 
+          ? "bg-zinc-800 text-zinc-300 border-zinc-700"
+          : "bg-gray-100 text-gray-700 border border-gray-200"
+      }`}>
+        <span>{config.emoji}</span>
+        {config.name}
+      </span>
+    );
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
       <div
-        className={`max-w-2xl w-full max-h-[80vh] overflow-y-auto rounded-2xl border ${
-          theme === "dark"
-            ? "bg-gray-800 border-gray-700"
-            : "bg-white border-gray-200"
+        className={`w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl ${
+          theme === "dark" ? "bg-zinc-900" : "bg-white"
         }`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-700">
+        <div className={`sticky top-0 z-10 flex items-center justify-between p-6 border-b ${
+          theme === "dark" ? "bg-zinc-900 border-zinc-800" : "bg-white border-gray-200"
+        }`}>
           <div>
-            <h2 className={`text-2xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-              Transaction Details
-            </h2>
-            <p className={`text-sm mt-1 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              {transaction.type}
+            <div className="flex items-center gap-3">
+              <h3 className={`text-xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                Transaction Details
+              </h3>
+              {getChainBadge()}
+            </div>
+            <p className={`text-sm mt-1 font-mono ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+              {shortenAddress(txHash)}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="text-2xl text-gray-400 hover:text-white transition-colors"
+            className={`p-2 rounded-lg transition-colors ${
+              theme === "dark" ? "hover:bg-zinc-800 text-zinc-400" : "hover:bg-gray-100 text-gray-600"
+            }`}
           >
-            ×
+            <X className="w-6 h-6" />
           </button>
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-6">
-          {/* Status */}
-          <div>
-            <label className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              Status
-            </label>
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
-              transaction.success
-                ? "bg-green-500/10 text-green-400 border border-green-500/20"
-                : "bg-red-500/10 text-red-400 border border-red-500/20"
-            }`}>
-              {transaction.success ? "✓ Success" : "✗ Failed"}
-            </span>
-          </div>
-
-          {/* Hash */}
-          <div>
-            <label className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              Transaction Hash
-            </label>
-            <div className="flex items-center gap-2">
-              <code className={`flex-1 px-3 py-2 rounded-lg text-sm font-mono ${
-                theme === "dark" ? "bg-gray-900 text-gray-300" : "bg-gray-100 text-gray-700"
-              }`}>
-                {transaction.hash}
-              </code>
-              <button
-                onClick={() => navigator.clipboard.writeText(transaction.hash)}
-                className={`px-3 py-2 rounded-lg text-sm ${
-                  theme === "dark" ? "bg-gray-700 hover:bg-gray-600" : "bg-gray-200 hover:bg-gray-300"
-                }`}
-              >
-                📋
-              </button>
-            </div>
-          </div>
-
-          {/* Time */}
-          <div>
-            <label className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              Time
-            </label>
-            <p className={theme === "dark" ? "text-white" : "text-gray-900"}>
-              {formatDate(transaction.timestamp)}
-            </p>
-          </div>
-
-          {/* Sender */}
-          <div>
-            <label className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              Sender
-            </label>
-            <code className={`block px-3 py-2 rounded-lg text-sm font-mono ${
-              theme === "dark" ? "bg-gray-900 text-gray-300" : "bg-gray-100 text-gray-700"
-            }`}>
-              {transaction.sender}
-            </code>
-          </div>
-
-          {/* Transaction Details */}
-          {Object.keys(transaction.details).length > 0 && (
-            <div>
-              <label className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                Details
-              </label>
-              <div className={`px-4 py-3 rounded-lg space-y-2 ${
-                theme === "dark" ? "bg-gray-900" : "bg-gray-100"
-              }`}>
-                {Object.entries(transaction.details).map(([key, value]) => (
-                  <div key={key} className="flex justify-between">
-                    <span className={`text-sm capitalize ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                      {key.replace(/_/g, " ")}:
-                    </span>
-                    <span className={`text-sm font-medium ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                      {typeof value === "object" ? JSON.stringify(value) : String(value)}
-                    </span>
-                  </div>
-                ))}
+        <div className="p-6">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex items-center gap-3">
+                <RefreshCw className={`w-6 h-6 animate-spin ${
+                  theme === "dark" ? "text-white" : "text-black"
+                }`} />
+                <span className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
+                  Loading transaction details...
+                </span>
               </div>
             </div>
-          )}
+          ) : error ? (
+            <div className="text-center py-12">
+              <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+              <p className={`mb-4 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                {error}
+              </p>
+              <button
+                onClick={loadTransactionDetail}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  theme === "dark"
+                    ? "bg-white text-black hover:bg-gray-200"
+                    : "bg-black text-white hover:bg-gray-800"
+                }`}
+              >
+                Try Again
+              </button>
+            </div>
+          ) : txDetail ? (
+            <div className="space-y-6">
+              {/* Status */}
+              <div className="flex items-center justify-between">
+                <span className={`text-sm font-medium ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                  Status
+                </span>
+                <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
+                  txDetail.success
+                    ? "bg-green-500/10 text-green-400 border border-green-500/20"
+                    : "bg-red-500/10 text-red-400 border border-red-500/20"
+                }`}>
+                  {txDetail.success ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      Success
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="w-4 h-4" />
+                      Failed
+                    </>
+                  )}
+                </span>
+              </div>
 
-          {/* Gas */}
-          <div>
-            <label className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              Gas Used
-            </label>
-            <p className={theme === "dark" ? "text-white" : "text-gray-900"}>
-              {transaction.gas_used} units
-            </p>
-          </div>
+              {/* Transaction Hash */}
+              <div>
+                <span className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                  Transaction Hash
+                </span>
+                <div className="flex items-center gap-2">
+                  <code className={`flex-1 px-3 py-2 rounded-lg font-mono text-sm ${
+                    theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-100 text-gray-700"
+                  }`}>
+                    {txHash}
+                  </code>
+                  <button
+                    onClick={() => copyToClipboard(txHash)}
+                    className={`p-2 rounded-lg transition-colors ${
+                      theme === "dark" ? "hover:bg-zinc-800 text-zinc-400" : "hover:bg-gray-200 text-gray-600"
+                    }`}
+                    title="Copy hash"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
+                {copied && (
+                  <p className="text-xs text-green-500 mt-1">Copied to clipboard!</p>
+                )}
+              </div>
 
-          {/* Function */}
-          {transaction.function && (
-            <div>
-              <label className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                Function
-              </label>
-              <code className={`block px-3 py-2 rounded-lg text-xs font-mono break-all ${
-                theme === "dark" ? "bg-gray-900 text-gray-300" : "bg-gray-100 text-gray-700"
-              }`}>
-                {transaction.function}
-              </code>
+              {/* Timestamp */}
+              {txDetail.timestamp && (
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                    Timestamp
+                  </span>
+                  <span className={`text-sm ${theme === "dark" ? "text-zinc-300" : "text-gray-700"}`}>
+                    {formatTimestamp(txDetail.timestamp)}
+                  </span>
+                </div>
+              )}
+
+              {/* Sender */}
+              {txDetail.sender && (
+                <div>
+                  <span className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                    From
+                  </span>
+                  <code className={`block px-3 py-2 rounded-lg font-mono text-sm ${
+                    theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-100 text-gray-700"
+                  }`}>
+                    {txDetail.sender}
+                  </code>
+                </div>
+              )}
+
+              {/* Type */}
+              {txDetail.type && (
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                    Type
+                  </span>
+                  <span className={`px-3 py-1 rounded text-sm font-medium ${
+                    theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-200 text-gray-700"
+                  }`}>
+                    {txDetail.type}
+                  </span>
+                </div>
+              )}
+
+              {/* Function */}
+              {txDetail.function && (
+                <div>
+                  <span className={`text-sm font-medium block mb-2 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                    Function
+                  </span>
+                  <code className={`block px-3 py-2 rounded-lg font-mono text-sm ${
+                    theme === "dark" ? "bg-zinc-800 text-zinc-300" : "bg-gray-100 text-gray-700"
+                  }`}>
+                    {txDetail.function}
+                  </code>
+                </div>
+              )}
+
+              {/* Gas Used */}
+              {txDetail.gas_used && (
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                    Gas Used
+                  </span>
+                  <span className={`text-sm ${theme === "dark" ? "text-zinc-300" : "text-gray-700"}`}>
+                    {txDetail.gas_used}
+                  </span>
+                </div>
+              )}
+
+              {/* Version */}
+              {txDetail.version && (
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                    Version
+                  </span>
+                  <span className={`text-sm ${theme === "dark" ? "text-zinc-300" : "text-gray-700"}`}>
+                    {txDetail.version}
+                  </span>
+                </div>
+              )}
+
+              {/* Sequence Number */}
+              {txDetail.sequence_number !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-medium ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+                    Sequence Number
+                  </span>
+                  <span className={`text-sm ${theme === "dark" ? "text-zinc-300" : "text-gray-700"}`}>
+                    {txDetail.sequence_number}
+                  </span>
+                </div>
+              )}
+
+              {/* View on Explorer Button */}
+              <div className="pt-4">
+                <a
+                  href={getExplorerUrl()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-colors ${
+                    theme === "dark"
+                      ? "bg-white text-black hover:bg-gray-200"
+                      : "bg-black text-white hover:bg-gray-800"
+                  }`}
+                >
+                  <span>View on {CHAIN_CONFIG[chain].name} Explorer</span>
+                  <ExternalLink className="w-4 h-4" />
+                </a>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <AlertTriangle className={`w-12 h-12 mx-auto mb-4 ${
+                theme === "dark" ? "text-zinc-600" : "text-gray-400"
+              }`} />
+              <p className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
+                No transaction details available
+              </p>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <div className="p-6 border-t border-gray-700 flex gap-3">
-          <button
-            onClick={openExplorer}
-            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors"
-          >
-            View on Explorer
-          </button>
-          <button
-            onClick={onClose}
-            className={`px-6 py-2 rounded-xl font-medium transition-colors ${
-              theme === "dark"
-                ? "bg-gray-700 text-gray-300 hover:bg-gray-600"
-                : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-            }`}
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>
