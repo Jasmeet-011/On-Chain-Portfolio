@@ -1,9 +1,9 @@
-// src/components/ManageWalletsModal.tsx - UPDATED: Toast Notifications
+// src/components/ManageWalletsModal.tsx - UPDATED: Multi-Chain Support (Aptos, Solana, EVM)
 import React, { useState } from "react";
 import { useAppContext } from "../context/AppContext";
-import { shortenAddress } from "../utils";
 import { X, Edit2, Save, Trash2, Star, Check, Loader2 } from "lucide-react";
 import type { ExtendedWalletInfo } from "../context/AppContext";
+import type { WalletType, ChainType } from "../api";
 import toast from "react-hot-toast";
 
 interface Props {
@@ -11,15 +11,27 @@ interface Props {
   onClose: () => void;
 }
 
-const SOURCE_LABELS: Record<'petra' | 'phantom' | 'manual', { label: string; icon: string; color: string }> = {
+// Wallet source labels (includes EVM wallets)
+const SOURCE_LABELS: Record<WalletType, { label: string; icon: string; color: string }> = {
   petra: { label: "Petra", icon: "🔴", color: "from-red-500 to-orange-500" },
   phantom: { label: "Phantom", icon: "👻", color: "from-purple-500 to-indigo-500" },
+  metamask: { label: "MetaMask", icon: "🦊", color: "from-orange-500 to-amber-500" },
+  coinbase: { label: "Coinbase", icon: "💙", color: "from-blue-500 to-blue-600" },
+  walletconnect: { label: "WalletConnect", icon: "🔗", color: "from-blue-400 to-cyan-500" },
   manual: { label: "Manual", icon: "📝", color: "from-gray-500 to-gray-600" },
 };
 
-const CHAIN_CONFIG = {
-  aptos: { name: "APTOS", emoji: "⬢", color: "bg-blue-500/10 text-blue-400 border-blue-500/20" },
-  solana: { name: "SOLANA", emoji: "◎", color: "bg-purple-500/10 text-purple-400 border-purple-500/20" },
+// Chain configuration (includes EVM chains)
+const CHAIN_CONFIG: Record<ChainType, { name: string; emoji: string; color: string }> = {
+  aptos:            { name: "APTOS",    emoji: "⬢",  color: "bg-blue-500/10 text-blue-400 border-blue-500/20" },
+  solana:           { name: "SOLANA",   emoji: "◎",  color: "bg-purple-500/10 text-purple-400 border-purple-500/20" },
+  ethereum:         { name: "ETHEREUM", emoji: "Ξ",  color: "bg-slate-500/10 text-slate-400 border-slate-500/20" },
+  ethereum_sepolia: { name: "SEPOLIA",  emoji: "Ξ",  color: "bg-slate-500/10 text-slate-400 border-slate-500/20" },
+  polygon:          { name: "POLYGON",  emoji: "⬡",  color: "bg-violet-500/10 text-violet-400 border-violet-500/20" },
+  polygon_amoy:     { name: "AMOY",     emoji: "⬡",  color: "bg-violet-500/10 text-violet-400 border-violet-500/20" },
+  base:             { name: "BASE",     emoji: "🔵", color: "bg-blue-600/10 text-blue-500 border-blue-600/20" },
+  base_sepolia:     { name: "BASE SEP", emoji: "🔵", color: "bg-blue-600/10 text-blue-500 border-blue-600/20" },
+  evm:              { name: "EVM",      emoji: "⬡",  color: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20" },
 };
 
 const ManageWalletsModal: React.FC<Props> = ({ isOpen, onClose }) => {
@@ -67,7 +79,7 @@ const ManageWalletsModal: React.FC<Props> = ({ isOpen, onClose }) => {
   };
 
   const handleRemove = async (wallet: ExtendedWalletInfo) => {
-    const isConnected = wallet.type === 'petra' || wallet.type === 'phantom';
+    const isConnected = ['petra', 'phantom', 'metamask', 'coinbase', 'walletconnect'].includes(wallet.type);
     
     // Confirmation
     const confirmMessage = wallets.length === 1
@@ -140,15 +152,24 @@ const ManageWalletsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     return SOURCE_LABELS[type] || { label: "Manual", icon: "📝", color: "from-gray-500 to-gray-600" };
   };
 
-  const getChainBadge = (chain: 'aptos' | 'solana') => {
+  const getChainBadge = (chain: ChainType) => {
     const config = CHAIN_CONFIG[chain];
+    // Light mode color mapping
+    const lightModeColors: Record<ChainType, string> = {
+      aptos:            "bg-blue-50 text-blue-600 border-blue-200",
+      solana:           "bg-purple-50 text-purple-600 border-purple-200",
+      ethereum:         "bg-slate-50 text-slate-600 border-slate-200",
+      ethereum_sepolia: "bg-slate-50 text-slate-600 border-slate-200",
+      polygon:          "bg-violet-50 text-violet-600 border-violet-200",
+      polygon_amoy:     "bg-violet-50 text-violet-600 border-violet-200",
+      base:             "bg-blue-50 text-blue-600 border-blue-200",
+      base_sepolia:     "bg-blue-50 text-blue-600 border-blue-200",
+      evm:              "bg-zinc-50 text-zinc-600 border-zinc-200",
+    };
+
     return (
       <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border ${
-        theme === "dark" 
-          ? config.color
-          : chain === 'aptos'
-            ? "bg-blue-50 text-blue-600 border-blue-200"
-            : "bg-purple-50 text-purple-600 border-purple-200"
+        theme === "dark" ? config.color : lightModeColors[chain]
       }`}>
         <span>{config.emoji}</span>
         {config.name}
@@ -156,8 +177,15 @@ const ManageWalletsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     );
   };
 
-  const aptosCount = wallets.filter(w => w.chain === 'aptos').length;
-  const solanaCount = wallets.filter(w => w.chain === 'solana').length;
+  // Count wallets by chain
+  const chainCounts = {
+    aptos: wallets.filter(w => w.chain === 'aptos').length,
+    solana: wallets.filter(w => w.chain === 'solana').length,
+    ethereum: wallets.filter(w => w.chain === 'ethereum').length,
+    polygon: wallets.filter(w => w.chain === 'polygon').length,
+    base: wallets.filter(w => w.chain === 'base').length,
+  };
+  const evmCount = chainCounts.ethereum + chainCounts.polygon + chainCounts.base;
 
   return (
     <div 
@@ -180,9 +208,13 @@ const ManageWalletsModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </h3>
             <p className={`text-sm mt-1 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
               {wallets.length} wallet{wallets.length !== 1 ? "s" : ""} connected
-              {(aptosCount > 0 && solanaCount > 0) && (
+              {wallets.length > 0 && (
                 <span className="ml-2">
-                  ({aptosCount} Aptos, {solanaCount} Solana)
+                  ({[
+                    chainCounts.aptos > 0 && `${chainCounts.aptos} Aptos`,
+                    chainCounts.solana > 0 && `${chainCounts.solana} Solana`,
+                    evmCount > 0 && `${evmCount} EVM`,
+                  ].filter(Boolean).join(', ')})
                 </span>
               )}
             </p>

@@ -48,15 +48,27 @@ solders==0.21.0               # Latest stable Solana SDK
 solana==0.34.3                # Latest stable (uses httpx 0.23.x)
 
 # ============================================================
-# Alert System (MVP4)
+# EVM Chain Support (NEW)
 # ============================================================
-APScheduler==3.10.4           # Background task scheduling
-sendgrid==6.11.0              # Email notifications
-python-dateutil==2.9.0        # Date parsing for history service
+web3==6.15.1                  # Ethereum and EVM chains
+eth-account==0.11.0           # Account utilities
+eth-typing==4.0.0             # Type hints for Ethereum
+
+# ============================================================
+# Alert System
+# ============================================================
+APScheduler==3.10.4
+sendgrid==6.11.0
+python-dateutil==2.9.0
+
+# ============================================================
+# Redis Caching
+# ============================================================
+redis==5.0.1                  # Redis client for distributed caching
 
 # ============================================================
 # Optional: Development Tools
 # ============================================================
-# pytest==8.0.0               # Testing
-# black==24.0.0               # Code formatting
-# flake8==7.0.0               # Linting
+# pytest==8.0.0
+# black==24.0.0
+# flake8==7.0.0

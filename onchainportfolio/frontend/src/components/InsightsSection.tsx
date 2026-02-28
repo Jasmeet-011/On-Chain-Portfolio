@@ -1,4 +1,4 @@
-// src/components/InsightsSection.tsx
+// src/components/InsightsSection.tsx - Uses centralized API client
 import React, { useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import {
@@ -9,43 +9,32 @@ import {
   Activity,
   RefreshCw,
 } from "lucide-react";
+import { api } from "../api";
+import type { PortfolioInsights } from "../api";
 
 type TabType = "exposure" | "dominance" | "concentration" | "volatility";
 
-const InsightsSection: React.FC = () => {
+interface InsightsSectionProps {
+  selectedScope?: string;  // 'complete' or wallet group id — triggers refetch on change
+}
+
+const InsightsSection: React.FC<InsightsSectionProps> = ({ selectedScope }) => {
   const { theme } = useAppContext();
-  const [insights, setInsights] = useState<any>(null);
+  const [insights, setInsights] = useState<PortfolioInsights | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>("exposure");
 
-  // Helper to get auth token
-  const getAuthToken = (): string => {
-    const userStr = localStorage.getItem("user");
-    if (!userStr) return "";
-    try {
-      const user = JSON.parse(userStr);
-      return user.access_token || "";
-    } catch {
-      return "";
-    }
-  };
-
+  // Refetch when scope changes so insights stay in sync with selected view
   useEffect(() => {
     fetchInsights();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedScope]);
 
   const fetchInsights = async () => {
     setLoading(true);
     try {
-      const token = getAuthToken();
-      const response = await fetch("http://localhost:8000/v1/insights/", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setInsights(data);
-      }
+      const data = await api.getInsights();
+      setInsights(data);
     } catch (err) {
       console.error("Failed to fetch insights:", err);
     } finally {
@@ -109,9 +98,57 @@ const InsightsSection: React.FC = () => {
             theme === "dark" ? "text-zinc-600" : "text-gray-400"
           }`}
         />
-        <p className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
+        <p className={`mb-2 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
           No insights available
         </p>
+        <p className={`text-sm ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
+          Add a wallet with token balances to see portfolio analytics
+        </p>
+        <button
+          onClick={fetchInsights}
+          className={`mt-4 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            theme === "dark"
+              ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+              : "bg-gray-100 hover:bg-gray-200 text-gray-700"
+          }`}
+        >
+          <RefreshCw className="w-4 h-4 inline mr-2" />
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // Check if insights are empty (no real data)
+  if (insights.total_tokens === 0 || insights.total_value_usd === 0) {
+    return (
+      <div
+        className={`rounded-xl p-8 text-center ${
+          theme === "dark" ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-gray-200"
+        }`}
+      >
+        <PieChart
+          className={`w-12 h-12 mx-auto mb-3 ${
+            theme === "dark" ? "text-zinc-600" : "text-gray-400"
+          }`}
+        />
+        <p className={`text-lg font-medium mb-2 ${theme === "dark" ? "text-zinc-300" : "text-gray-700"}`}>
+          No Portfolio Data Yet
+        </p>
+        <p className={`text-sm mb-4 ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
+          {insights.key_insights[0] || "Add wallets with token balances to see analytics"}
+        </p>
+        <button
+          onClick={fetchInsights}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            theme === "dark"
+              ? "bg-blue-600 hover:bg-blue-700 text-white"
+              : "bg-blue-500 hover:bg-blue-600 text-white"
+          }`}
+        >
+          <RefreshCw className="w-4 h-4 inline mr-2" />
+          Refresh
+        </button>
       </div>
     );
   }

@@ -7,12 +7,13 @@ Includes fallbacks and better error handling.
 """
 import httpx
 import os
-import asyncio
+import logging
 from typing import List, Dict, Optional
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
 
 from app.models.nft_models import NFT, CollectionSummary, NFTResponse
+
+logger = logging.getLogger("chainlens.services.nft")
 
 
 class NFTService:
@@ -23,25 +24,28 @@ class NFTService:
         self.helius_api_key = os.getenv("HELIUS_API_KEY", "")
         self.simplehash_api_key = os.getenv("SIMPLEHASH_API_KEY", "")
         
+        # Use testnet indexer by default (matching config.py testnet setting)
         self.aptos_indexer_url = os.getenv(
             "APTOS_INDEXER_URL",
-            "https://indexer.mainnet.aptoslabs.com/v1/graphql"
+            "https://indexer.testnet.aptoslabs.com/v1/graphql"
         )
         
-        # Helius DAS API endpoint (newer, more reliable)
-        self.helius_rpc_url = f"https://mainnet.helius-rpc.com/?api-key={self.helius_api_key}" if self.helius_api_key else None
+        # Helius DAS API endpoint - use devnet for testing
+        # Note: For testnet/devnet, Helius uses devnet.helius-rpc.com
+        helius_network = os.getenv("HELIUS_NETWORK", "devnet")  # devnet for testing, mainnet for prod
+        self.helius_rpc_url = f"https://{helius_network}.helius-rpc.com/?api-key={self.helius_api_key}" if self.helius_api_key else None
         
         # SimpleHash fallback (free tier: 1000 requests/day)
         self.simplehash_url = "https://api.simplehash.com/api/v0"
         
-        print("[NFT] NFT service initialized")
+        logger.info("NFT service initialized")
         if self.helius_api_key:
-            print("[NFT] ✅ Helius API key configured")
+            logger.info("Helius API key configured")
         else:
-            print("[NFT] ⚠️  No Helius API key - Solana NFTs may fail")
-        
+            logger.warning("No Helius API key - Solana NFTs may fail")
+
         if self.simplehash_api_key:
-            print("[NFT] ✅ SimpleHash API key configured (fallback)")
+            logger.info("SimpleHash API key configured (fallback)")
     
     # ============================================================
     # SOLANA NFTs - HELIUS DAS API (Primary)
@@ -59,10 +63,10 @@ class NFTService:
             List of NFTs
         """
         if not self.helius_api_key:
-            print("[NFT] ⚠️  No Helius API key - trying alternative methods")
+            logger.warning("No Helius API key - trying alternative methods")
             return self.get_solana_nfts_simplehash(wallet_address)
-        
-        print(f"[NFT] Fetching Solana NFTs via Helius DAS for {wallet_address[:8]}...")
+
+        logger.info("Fetching Solana NFTs via Helius DAS for %s...", wallet_address[:8])
         
         try:
             # DAS API - getAssetsByOwner
@@ -86,37 +90,37 @@ class NFTService:
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(self.helius_rpc_url, json=payload)
                 
-                print(f"[NFT] Helius response status: {response.status_code}")
-                
+                logger.debug("Helius response status: %d", response.status_code)
+
                 if response.status_code != 200:
-                    print(f"[NFT] ❌ Helius DAS error: {response.status_code}")
-                    print(f"[NFT] Response: {response.text[:500]}")
+                    logger.error("Helius DAS error: %d", response.status_code)
+                    logger.debug("Response: %s", response.text[:500])
                     return self.get_solana_nfts_simplehash(wallet_address)
-                
+
                 data = response.json()
-            
-            # Debug: Print raw response structure
-            print(f"[NFT] Helius raw response keys: {data.keys()}")
-            
+
+            # Debug: Log raw response structure
+            logger.debug("Helius raw response keys: %s", data.keys())
+
             if "error" in data:
-                print(f"[NFT] ❌ Helius DAS error: {data['error']}")
+                logger.error("Helius DAS error: %s", data['error'])
                 return self.get_solana_nfts_simplehash(wallet_address)
-            
-            # Debug: Print result structure
+
+            # Debug: Log result structure
             result = data.get("result", {})
-            print(f"[NFT] Helius result keys: {result.keys() if isinstance(result, dict) else 'not a dict'}")
-            print(f"[NFT] Helius total items: {result.get('total', 0)}")
-            print(f"[NFT] Helius items count: {len(result.get('items', []))}")
+            logger.debug("Helius result keys: %s", result.keys() if isinstance(result, dict) else 'not a dict')
+            logger.debug("Helius total items: %d", result.get('total', 0))
+            logger.debug("Helius items count: %d", len(result.get('items', [])))
             
             items = data.get("result", {}).get("items", [])
             nfts = []
             
-            print(f"[NFT] Processing {len(items)} items from Helius...")
-            
+            logger.debug("Processing %d items from Helius...", len(items))
+
             for idx, item in enumerate(items):
                 # Debug first few items
                 if idx < 3:
-                    print(f"[NFT] Item {idx}: interface={item.get('interface')}, id={item.get('id', '')[:20]}...")
+                    logger.debug("Item %d: interface=%s, id=%s...", idx, item.get('interface'), item.get('id', '')[:20])
                 
                 # Skip fungible tokens
                 if item.get("interface") == "FungibleToken":
@@ -167,14 +171,14 @@ class NFTService:
                     chain="solana"
                 ))
             
-            print(f"[NFT] ✅ Found {len(nfts)} Solana NFTs via Helius DAS")
+            logger.info("Found %d Solana NFTs via Helius DAS", len(nfts))
             return nfts
-        
+
         except httpx.TimeoutException:
-            print("[NFT] ❌ Helius DAS timeout - trying fallback")
+            logger.error("Helius DAS timeout - trying fallback")
             return self.get_solana_nfts_simplehash(wallet_address)
-        except Exception as e:
-            print(f"[NFT] ❌ Error fetching Solana NFTs via Helius: {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.error("Error fetching Solana NFTs via Helius: %s", e)
             return self.get_solana_nfts_simplehash(wallet_address)
     
     # ============================================================
@@ -193,10 +197,10 @@ class NFTService:
             List of NFTs
         """
         if not self.simplehash_api_key:
-            print("[NFT] ⚠️  No SimpleHash API key - returning empty")
+            logger.warning("No SimpleHash API key - returning empty")
             return []
-        
-        print(f"[NFT] Fetching Solana NFTs via SimpleHash for {wallet_address[:8]}...")
+
+        logger.info("Fetching Solana NFTs via SimpleHash for %s...", wallet_address[:8])
         
         try:
             url = f"{self.simplehash_url}/nfts/owners"
@@ -214,7 +218,7 @@ class NFTService:
                 response = client.get(url, params=params, headers=headers)
                 
                 if response.status_code != 200:
-                    print(f"[NFT] ❌ SimpleHash error: {response.status_code}")
+                    logger.error("SimpleHash error: %d", response.status_code)
                     return []
                 
                 data = response.json()
@@ -242,11 +246,11 @@ class NFTService:
                     chain="solana"
                 ))
             
-            print(f"[NFT] ✅ Found {len(nfts)} Solana NFTs via SimpleHash")
+            logger.info("Found %d Solana NFTs via SimpleHash", len(nfts))
             return nfts
-        
-        except Exception as e:
-            print(f"[NFT] ❌ Error fetching Solana NFTs via SimpleHash: {e}")
+
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
+            logger.error("Error fetching Solana NFTs via SimpleHash: %s", e)
             return []
     
     # ============================================================
@@ -261,7 +265,7 @@ class NFTService:
         This is a placeholder - real implementation would need
         to parse token accounts manually.
         """
-        print(f"[NFT] ⚠️  No API keys available for Solana NFTs")
+        logger.warning("No API keys available for Solana NFTs")
         return []
     
     # ============================================================
@@ -278,7 +282,7 @@ class NFTService:
         Returns:
             List of NFTs
         """
-        print(f"[NFT] Fetching Aptos NFTs for {wallet_address[:8]}...")
+        logger.info("Fetching Aptos NFTs for %s...", wallet_address[:8])
         
         try:
             # GraphQL query for current token ownerships v2
@@ -319,14 +323,14 @@ class NFTService:
                 )
                 
                 if response.status_code != 200:
-                    print(f"[NFT] ❌ Aptos Indexer error: {response.status_code}")
-                    print(f"[NFT] Response: {response.text[:200]}")
+                    logger.error("Aptos Indexer error: %d", response.status_code)
+                    logger.debug("Response: %s", response.text[:200])
                     return []
-                
+
                 data = response.json()
-            
+
             if "errors" in data:
-                print(f"[NFT] ❌ Aptos GraphQL errors: {data['errors']}")
+                logger.error("Aptos GraphQL errors: %s", data['errors'])
                 return []
             
             nfts = []
@@ -372,14 +376,14 @@ class NFTService:
                     chain="aptos"
                 ))
             
-            print(f"[NFT] ✅ Found {len(nfts)} Aptos NFTs")
+            logger.info("Found %d Aptos NFTs", len(nfts))
             return nfts
-        
+
         except httpx.TimeoutException:
-            print("[NFT] ❌ Aptos Indexer timeout")
+            logger.error("Aptos Indexer timeout")
             return []
-        except Exception as e:
-            print(f"[NFT] ❌ Error fetching Aptos NFTs: {e}")
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            logger.error("Error fetching Aptos NFTs: %s", e)
             return []
     
     def _try_fetch_aptos_image(self, uri: str) -> Optional[str]:
@@ -426,14 +430,15 @@ class NFTService:
                             image = f"https://cloudflare-ipfs.com/ipfs/{image[7:]}"
                         return image
                     
-                except:
+                except (ValueError, KeyError):
                     # Not JSON, might be the image itself
                     content_type = response.headers.get("content-type", "")
                     if "image" in content_type:
                         return uri
-            
+
             return None
-        except:
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            logger.debug("Failed to fetch Aptos image: %s", e)
             return None
     
     # ============================================================
@@ -466,15 +471,15 @@ class NFTService:
         Returns:
             NFTResponse with NFTs and collection summary
         """
-        print(f"[NFT] Getting NFTs for {wallet_address[:8]}... (chain: {chain})")
-        
+        logger.info("Getting NFTs for %s... (chain: %s)", wallet_address[:8], chain)
+
         # Fetch NFTs
         if chain == "solana":
             nfts = self.get_solana_nfts(wallet_address)
         elif chain == "aptos":
             nfts = self.get_aptos_nfts(wallet_address)
         else:
-            print(f"[NFT] ❌ Unknown chain: {chain}")
+            logger.error("Unknown chain: %s", chain)
             nfts = []
         
         # Group by collection

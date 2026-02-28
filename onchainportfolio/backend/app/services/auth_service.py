@@ -4,6 +4,7 @@ from bson import ObjectId
 from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+import secrets
 
 from .db import users_collection
 from app.config import settings
@@ -74,24 +75,62 @@ def get_user_by_id(user_id: str) -> Optional[dict]:
     except Exception:
         return None
 
+def generate_verification_token() -> str:
+    """Generate a secure URL-safe random verification token."""
+    return secrets.token_urlsafe(32)
+
+
 def create_user(name: str, email: str, password: str) -> dict:
     """
     Create a user document in MongoDB.
-    
+
     NOTE: No longer stores wallets as embedded array.
     Wallets are managed separately via wallet_service.
     """
     password_hash = hash_password(password)
+    verification_token = generate_verification_token()
     user_doc = {
         "name": name,
         "email": email,
         "password_hash": password_hash,
         "wallet_address": None,  # DEPRECATED: Kept for backward compatibility
+        "is_email_verified": False,
+        "email_verification_token": verification_token,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     result = users_collection.insert_one(user_doc)
     user_doc["_id"] = result.inserted_id
     return user_doc
+
+
+def get_user_by_verification_token(token: str) -> Optional[dict]:
+    """Find a user by their email verification token."""
+    return users_collection.find_one({"email_verification_token": token})
+
+
+def verify_user_email(user_id: str) -> bool:
+    """Mark a user's email as verified and clear the verification token."""
+    result = users_collection.update_one(
+        {"_id": ObjectId(user_id)},
+        {
+            "$set": {
+                "is_email_verified": True,
+                "email_verified_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "$unset": {"email_verification_token": ""},
+        }
+    )
+    return result.modified_count > 0
+
+
+def refresh_verification_token(user_id: str) -> Optional[str]:
+    """Generate a new verification token for a user (for resend)."""
+    token = generate_verification_token()
+    result = users_collection.update_one(
+        {"_id": ObjectId(user_id), "is_email_verified": False},
+        {"$set": {"email_verification_token": token}}
+    )
+    return token if result.modified_count > 0 else None
 
 def authenticate_user(email: str, password: str) -> Optional[dict]:
     """Return user if email/password are valid, else None."""

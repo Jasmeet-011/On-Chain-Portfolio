@@ -4,6 +4,7 @@ NFT Router
 
 Endpoints for fetching NFTs from user wallets.
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 
@@ -12,6 +13,7 @@ from app.services.nft_service import get_nft_service
 from app.services.db import wallets_collection
 from app.deps import get_current_user
 
+logger = logging.getLogger("chainlens.routers.nfts")
 router = APIRouter()
 
 
@@ -49,15 +51,15 @@ async def get_wallet_nfts(
             detail="Wallet not found or doesn't belong to user"
         )
     
-    print(f"[NFT] Fetching NFTs for wallet {wallet_address[:8]}... ({chain})")
-    
+    logger.info("Fetching NFTs for wallet %s... (%s)", wallet_address[:8], chain)
+
     try:
         nft_service = get_nft_service()
         nft_response = nft_service.get_nfts_for_wallet(wallet_address, chain)
         return nft_response
-    
-    except Exception as e:
-        print(f"[NFT] ❌ Error fetching NFTs: {e}")
+
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        logger.error("Error fetching NFTs: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -86,30 +88,30 @@ async def get_all_nfts(
             all_nfts=[]
         )
     
-    print(f"[NFT] Fetching NFTs for {len(wallets)} wallets")
-    
+    logger.info("Fetching NFTs for %d wallets", len(wallets))
+
     nft_service = get_nft_service()
-    
+
     # Fetch NFTs for each wallet
     wallet_nfts: List[NFTResponse] = []
-    
+
     for wallet in wallets:
         address = wallet.get("address")
         chain = wallet.get("chain", "aptos")
-        
+
         try:
             nft_response = nft_service.get_nfts_for_wallet(address, chain)
             wallet_nfts.append(nft_response)
-        
-        except Exception as e:
-            print(f"[NFT] ⚠️  Failed to fetch NFTs for {address[:8]}: {e}")
+
+        except (ValueError, RuntimeError, ConnectionError) as e:
+            logger.warning("Failed to fetch NFTs for %s: %s", address[:8], e)
             continue
-    
+
     # Aggregate all NFTs
     aggregated = nft_service.aggregate_nfts(wallet_nfts)
-    
-    print(f"[NFT] ✅ Total NFTs: {aggregated['total_nfts']}")
-    print(f"[NFT] ✅ Total collections: {aggregated['total_collections']}")
+
+    logger.info("Total NFTs: %d", aggregated['total_nfts'])
+    logger.info("Total collections: %d", aggregated['total_collections'])
     
     return AggregatedNFTResponse(**aggregated)
 
@@ -147,7 +149,8 @@ async def get_collections_summary(
         try:
             nft_response = nft_service.get_nfts_for_wallet(address, chain)
             wallet_nfts.append(nft_response)
-        except:
+        except (ValueError, RuntimeError, ConnectionError) as e:
+            logger.warning("Failed to fetch NFTs for collection summary: %s", e)
             continue
     
     # Aggregate

@@ -141,6 +141,7 @@ export const api = {
 
   /**
    * Get complete portfolio for a wallet
+   * Backend endpoint: GET /v1/wallets/{chain}/{address}/portfolio
    */
   async getPortfolio(address: string, chain: string = "aptos") {
     if (MOCK_MODE) {
@@ -149,7 +150,8 @@ export const api = {
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/wallets/${address}/portfolio?chain=${chain}`);
+      // Use path params: /wallets/{chain}/{address}/portfolio
+      const res = await fetch(`${API_BASE_URL}/wallets/${chain}/${address}/portfolio`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     } catch (error) {
@@ -421,9 +423,9 @@ export const api = {
   async addWallet(
     address: string,
     label: string = "Wallet",
-    type: "petra" | "phantom" | "manual" = "manual",
+    type: WalletType = "manual",
     isPrimary: boolean = false,
-    chain: "aptos" | "solana" = "aptos"
+    chain: ChainType = "aptos"
   ): Promise<WalletResponse> {
     if (MOCK_MODE) {
       return {
@@ -725,12 +727,388 @@ export const api = {
       throw error;
     }
   },
+
+  // ============================================================
+  // ALERTS ENDPOINTS
+  // ============================================================
+
+  /**
+   * Get all alerts for the current user
+   */
+  async getAlerts(): Promise<Alert[]> {
+    if (MOCK_MODE) {
+      return [];
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/alerts`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.alerts || []);
+    } catch (error) {
+      console.error("Failed to fetch alerts:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Create a new alert
+   */
+  async createAlert(alertData: CreateAlertRequest): Promise<Alert> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/alerts`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(alertData),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to create alert");
+      }
+
+      return res.json();
+    } catch (error) {
+      console.error("Failed to create alert:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Update an alert
+   */
+  async updateAlert(alertId: string, updates: Partial<Alert>): Promise<Alert> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/alerts/${alertId}`, {
+        method: "PATCH",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updates),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to update alert:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Delete an alert
+   */
+  async deleteAlert(alertId: string): Promise<void> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/alerts/${alertId}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (error) {
+      console.error("Failed to delete alert:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get the current price of a single token (for CreateAlertModal preview)
+   */
+  async getTokenPrice(symbol: string, chain?: string): Promise<number | null> {
+    try {
+      const chainParam = chain ? `&chain=${chain}` : "";
+      const res = await fetch(
+        `${API_BASE_URL}/prices?symbols=${encodeURIComponent(symbol)}${chainParam}`,
+        { headers: getAuthHeaders() }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data.prices?.[symbol.toUpperCase()] as number) ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Get portfolio suggestions (rule-based rebalancing recommendations)
+   */
+  async getAlertSuggestions(): Promise<PortfolioSuggestion[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/alerts/suggestions`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data.suggestions as PortfolioSuggestion[]) || [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Test an alert (send test email)
+   */
+  async testAlert(alertId: string): Promise<{ message: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/alerts/${alertId}/test`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to test alert:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get email preferences
+   */
+  async getEmailPreferences(): Promise<EmailPreferences> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/alerts/preferences/email`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to get email preferences:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Update email preferences
+   */
+  async updateEmailPreferences(prefs: Partial<EmailPreferences>): Promise<EmailPreferences> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/alerts/preferences/email`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(prefs),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to update email preferences:", error);
+      throw error;
+    }
+  },
+
+  // ============================================================
+  // EMAIL VERIFICATION
+  // ============================================================
+
+  /**
+   * Verify email with token from the verification link
+   */
+  async verifyEmail(token: string): Promise<{ message: string }> {
+    const res = await fetch(`${API_ORIGIN}/auth/verify-email/${token}`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || "Verification failed");
+    }
+    return res.json();
+  },
+
+  /**
+   * Resend verification email to the currently logged-in user
+   */
+  async resendVerification(): Promise<{ message: string }> {
+    const res = await fetch(`${API_ORIGIN}/auth/resend-verification`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || "Failed to resend verification email");
+    }
+    return res.json();
+  },
+
+  // ============================================================
+  // INSIGHTS ENDPOINTS
+  // ============================================================
+
+  /**
+   * Get portfolio insights
+   */
+  async getInsights(): Promise<PortfolioInsights> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/insights/`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch insights:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get quick insights summary
+   */
+  async getInsightsSummary(): Promise<InsightsSummary> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/insights/summary`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch insights summary:", error);
+      throw error;
+    }
+  },
+
+  // ============================================================
+  // NFT ENDPOINTS
+  // ============================================================
+
+  /**
+   * Get all NFTs across all wallets
+   * Returns aggregated NFT response with collections and totals
+   */
+  async getAllNFTs(): Promise<AggregatedNFTResponse> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/nfts/all`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch NFTs:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get NFTs for a specific wallet
+   */
+  async getWalletNFTs(address: string, chain: string = "aptos"): Promise<NFTResponse> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/nfts/wallet/${address}?chain=${chain}`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch wallet NFTs:", error);
+      throw error;
+    }
+  },
+
+  // ============================================================
+  // MULTI-CHAIN ENDPOINTS
+  // ============================================================
+
+  /**
+   * Get multi-chain balances for a wallet address
+   * Auto-detects address type and queries all applicable chains
+   */
+  async getMultiChainBalances(address: string, testnet: boolean = true): Promise<MultiChainBalanceResponse> {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/wallets/${address}/multi-chain-balances?testnet=${testnet}`,
+        { headers: getAuthHeaders() }
+      );
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch multi-chain balances:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get multi-chain portfolio for a wallet
+   * For EVM addresses, aggregates balances from all EVM chains
+   */
+  /**
+   * Get aggregated portfolio for a wallet group (multiple addresses across chains).
+   * Used by Dashboard when a provider (e.g., Phantom) is selected.
+   * Also used by Analytics for "All Wallets" combined view.
+   */
+  async getGroupPortfolio(
+    wallets: Array<{ address: string; chain: string }>,
+    testnet: boolean = true
+  ): Promise<GroupPortfolioResponse> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/portfolio/multi-wallet`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ wallets, testnet }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch group portfolio:", error);
+      throw error;
+    }
+  },
+
+  async getMultiChainPortfolio(address: string, testnet: boolean = true): Promise<MultiChainPortfolioResponse> {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/wallets/${address}/multi-chain-portfolio?testnet=${testnet}`,
+        { headers: getAuthHeaders() }
+      );
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    } catch (error) {
+      console.error("Failed to fetch multi-chain portfolio:", error);
+      throw error;
+    }
+  },
 };
 
 
 // ============================================================
 // Type Definitions
 // ============================================================
+
+// Multi-wallet group portfolio response
+export interface GroupPortfolioResponse {
+  wallets_queried: number;
+  chains_queried: string[];
+  all_balances: GroupTokenBalance[];
+  by_wallet: Record<string, {
+    address: string;
+    balances: GroupTokenBalance[];
+    total_usd_value: number;
+  }>;
+  total_usd_value: number;
+  total_tokens: number;
+}
+
+export interface GroupTokenBalance {
+  symbol: string;
+  address?: string;
+  decimals?: number;
+  raw?: string;
+  amount: number;
+  usd_price?: number | null;
+  usd_value?: number;
+  chain: string;
+  wallet_address: string;
+  is_native?: boolean;
+}
 
 export interface TokenBalance {
   symbol: string;
@@ -782,13 +1160,20 @@ export interface WalletInfo {
   added_at?: string;
 }
 
+// Supported blockchain chains
+// "evm" is a special type that queries all EVM chains (ethereum, polygon, base)
+export type ChainType = "aptos" | "solana" | "ethereum" | "polygon" | "base" | "evm" | "ethereum_sepolia" | "polygon_amoy" | "base_sepolia";
+
+// Supported wallet types
+export type WalletType = "petra" | "phantom" | "metamask" | "coinbase" | "walletconnect" | "manual";
+
 export interface WalletResponse {
   id: string;
   _id?: string;  // ✅ ADDED: MongoDB ID (alias for id)
   user_id: string;
   address: string;
-  chain: "aptos" | "solana";
-  type: "petra" | "phantom" | "manual";
+  chain: ChainType;
+  type: WalletType;
   label: string;
   is_primary: boolean;
   created_at: string;
@@ -903,4 +1288,195 @@ export interface DetailedPortfolioHistoryResponse {
   wallet_events: WalletEvent[];
   wallet_breakdown: WalletBreakdown[];
   metadata: PortfolioHistoryMetadata;
+}
+
+// ============================================================
+// Alert Types
+// ============================================================
+
+export interface Alert {
+  id: string;
+  user_id: string;
+  alert_type: string;
+  token_symbol: string;
+  chain: string;
+  condition: "above" | "below";
+  target_price: number;
+  current_price?: number;
+  wallet_address?: string;
+  is_active: boolean;
+  is_recurring: boolean;
+  status: string;
+  last_triggered?: string;
+  trigger_count: number;
+  last_checked?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CreateAlertRequest {
+  alert_type: string;
+  token_symbol: string;
+  chain?: string;
+  condition: "above" | "below";
+  target_price: number;
+  wallet_address?: string;
+  is_recurring?: boolean;
+}
+
+export interface EmailPreferences {
+  email_enabled: boolean;
+  daily_digest: boolean;
+  weekly_summary: boolean;
+  instant_alerts: boolean;
+}
+
+// ============================================================
+// Insights Types
+// ============================================================
+
+export interface ChainExposure {
+  chain: string;
+  value_usd: number;
+  percentage: number;
+  wallet_count: number;
+}
+
+export interface TokenDominance {
+  rank: number;
+  symbol: string;
+  chain: string;
+  value_usd: number;
+  percentage: number;
+}
+
+export interface ConcentrationWarning {
+  symbol: string;
+  percentage: number;
+  risk_level: string;
+  message: string;
+}
+
+export interface PortfolioInsights {
+  overall_risk_score: string;
+  key_insights: string[];
+  recommendations: string[];
+  total_value_usd: number;
+  total_tokens: number;
+  total_wallets: number;
+  chain_exposure: {
+    exposures: ChainExposure[];
+    diversity_score: string;
+  };
+  token_dominance: {
+    tokens: TokenDominance[];
+  };
+  concentration: {
+    token_count: number;
+    herfindahl_index: number;
+    overall_risk: string;
+    warnings: ConcentrationWarning[];
+  };
+  volatility: {
+    stablecoins: { value_usd: number; percentage: number };
+    volatile: { value_usd: number; percentage: number };
+    stablecoin_list: string[];
+    risk_label: string;
+  };
+}
+
+export interface InsightsSummary {
+  risk_score: string;
+  total_value: number;
+  top_insight: string;
+  top_recommendation: string;
+}
+
+// ============================================================
+// NFT Types
+// ============================================================
+
+export interface NFT {
+  id: string;
+  name: string;
+  description?: string;
+  image_url?: string;
+  collection_name?: string;
+  chain: string;
+  wallet_address: string;
+  token_id?: string;
+  metadata?: Record<string, any>;
+}
+
+export interface NFTCollection {
+  collection_name: string;
+  chain: string;
+  count: number;
+  sample_nfts: NFT[];
+}
+
+export interface NFTResponse {
+  wallet_address: string;
+  chain: string;
+  nfts: NFT[];
+  total_count: number;
+  collections: NFTCollection[];
+}
+
+export interface AggregatedNFTResponse {
+  total_nfts: number;
+  total_collections: number;
+  by_chain: Record<string, number>;
+  collections: NFTCollection[];
+  all_nfts: NFT[];
+}
+
+// ============================================================
+// Multi-Chain Types
+// ============================================================
+
+export interface MultiChainTokenBalance {
+  symbol: string;
+  address: string;
+  decimals: number;
+  raw: string;
+  amount: number;
+  usd_price?: number;
+  usd_value?: number;
+  chain: string;
+}
+
+export interface MultiChainBalanceResponse {
+  wallet_address: string;
+  address_type: string;
+  chains_queried: string[];
+  balances_by_chain: Record<string, MultiChainTokenBalance[]>;
+  all_balances: MultiChainTokenBalance[];
+  total_usd_value: number;
+  total_token_count: number;
+  chain_totals: Record<string, number>;
+}
+
+export interface MultiChainPortfolioResponse {
+  wallet_address: string;
+  address_type: string;
+  chains_queried: string[];
+  balances_by_chain: Record<string, MultiChainTokenBalance[]>;
+  all_balances: MultiChainTokenBalance[];
+  total_usd_value: number;
+  total_token_count: number;
+  chain_totals: Record<string, number>;
+}
+
+// ============================================================
+// Portfolio Suggestion Types
+// ============================================================
+
+export interface PortfolioSuggestion {
+  type: "reduce" | "buy" | "diversify" | "take_profit";
+  priority: "high" | "medium" | "low";
+  token: string | null;
+  title: string;
+  reason: string;
+  action: string;
 }

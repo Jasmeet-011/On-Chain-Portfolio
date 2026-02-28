@@ -1,8 +1,9 @@
-// src/App.tsx - UPDATED: Added Toast Notifications Support
+// src/App.tsx - UPDATED: Multi-Chain Support (Aptos, Solana, EVM)
 import React, { useState, useEffect } from "react";
 import { Toaster } from "react-hot-toast";
 import { WalletProvider } from "./context/WalletProvider";
 import { SolanaWalletProvider } from "./context/SolanaWalletProvider";
+import { EVMWalletProvider } from "./context/EVMWalletProvider";
 import { AppProvider, useAppContext } from "./context/AppContext";
 import Sidebar, { type TabType } from "./components/Sidebar";
 import Header from "./components/Header";
@@ -14,6 +15,7 @@ import ChatPage from "./pages/ChatPage";
 import AlertsPage from "./pages/AlertsPage";
 import SignInPage from "./pages/SignInPage";
 import SignUpPage from "./pages/SignUpPage";
+import LandingPage from "./pages/LandingPage";
 
 // ✅ Toast Configuration Component (inside AppProvider for theme access)
 const ToastConfig: React.FC = () => {
@@ -79,7 +81,7 @@ const AppShell: React.FC = () => {
     return !!user;
   });
 
-  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authMode, setAuthMode] = useState<"landing" | "signin" | "signup">("landing");
   const [activeTab, setActiveTab] = useState<TabType>("home");
 
   // Sidebar collapse state (responsive: collapsed on mobile by default)
@@ -123,7 +125,7 @@ const AppShell: React.FC = () => {
   const handleLogout = () => {
     logout();
     setIsAuthenticated(false);
-    setAuthMode("signin");
+    setAuthMode("landing");
     setActiveTab("home");
   };
 
@@ -138,6 +140,18 @@ const AppShell: React.FC = () => {
 
   // Auth screens
   if (!isAuthenticated) {
+    if (authMode === "landing") {
+      return (
+        <>
+          <ToastConfig />
+          <LandingPage
+            onSignIn={() => setAuthMode("signin")}
+            onSignUp={() => setAuthMode("signup")}
+          />
+        </>
+      );
+    }
+
     if (authMode === "signin") {
       return (
         <>
@@ -148,6 +162,7 @@ const AppShell: React.FC = () => {
               setIsAuthenticated(true);
               setActiveTab("home");
             }}
+            onBack={() => setAuthMode("landing")}
           />
         </>
       );
@@ -162,6 +177,7 @@ const AppShell: React.FC = () => {
             setIsAuthenticated(true);
             setActiveTab("home");
           }}
+          onBack={() => setAuthMode("landing")}
         />
       </>
     );
@@ -237,13 +253,15 @@ const AppShell: React.FC = () => {
   );
 };
 
-// Correct provider nesting order
+// Correct provider nesting order (Aptos, Solana, EVM)
 const App: React.FC = () => (
   <WalletProvider>
     <SolanaWalletProvider>
-      <AppProvider>
-        <AppShell />
-      </AppProvider>
+      <EVMWalletProvider>
+        <AppProvider>
+          <AppShell />
+        </AppProvider>
+      </EVMWalletProvider>
     </SolanaWalletProvider>
   </WalletProvider>
 );

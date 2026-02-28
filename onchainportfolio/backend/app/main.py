@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import health, balances, prices, portfolio, chat, transactions, history, alerts ,nfts, insights
+from .routers import health, balances, prices, portfolio, chat, transactions, history, alerts, nfts, insights, chains
 from .routers.auth import router as auth_router
 from .routers.wallets import router as wallets_router
 from .services.db import setup_indexes
@@ -23,9 +23,19 @@ app = FastAPI(
 async def startup_event():
     """Run database setup, migrations, and initialize alert system on app startup."""
     print("\n" + "=" * 60)
-    print("🚀 STARTING CHAINIQ BACKEND")
+    print("🚀 STARTING CHAINLENS BACKEND")
     print("=" * 60)
-    
+
+    # Initialize Cache (Redis or in-memory fallback)
+    print("\n[STARTUP] 🗄️  Initializing cache...")
+    try:
+        from app.services.cache import initialize_cache, cache
+        initialize_cache()
+        print(f"[STARTUP] ✅ Cache initialized ({cache.backend_name} backend)")
+    except Exception as e:
+        print(f"[STARTUP] ⚠️  Cache initialization failed: {e}")
+        print("[STARTUP] Using in-memory cache fallback")
+
     # Database connection and indexes (auto-created in db.py)
     print("\n[STARTUP] ✅ Database connected")
     print("[STARTUP] ✅ Indexes created")
@@ -115,8 +125,10 @@ app.include_router(chat.router, prefix="/v1", tags=["chat"])
 app.include_router(transactions.router, prefix="/v1", tags=["transactions"])
 app.include_router(history.router, prefix="/v1/history", tags=["history"])
 app.include_router(alerts.router, prefix="/v1/alerts", tags=["alerts"])
-app.include_router(nfts.router, prefix="/v1/nfts", tags=["nfts"]) 
+app.include_router(nfts.router, prefix="/v1/nfts", tags=["nfts"])
 app.include_router(insights.router, prefix="/v1/insights", tags=["insights"])
+app.include_router(chains.router, prefix="/v1", tags=["chains"])
+
 # ============================================================
 # Authentication & Wallet Management
 # ============================================================

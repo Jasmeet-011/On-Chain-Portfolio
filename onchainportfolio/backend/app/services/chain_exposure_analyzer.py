@@ -1,5 +1,6 @@
 # backend/app/services/chain_exposure_analyzer.py - MVP5 CHAIN EXPOSURE ANALYSIS
 
+import math
 from typing import List, Dict
 from collections import defaultdict
 from app.models.insights_models import (
@@ -244,7 +245,8 @@ def get_chain_emoji(chain: str) -> str:
         "solana": "◎",
         "aptos": "⬢",
         "ethereum": "Ξ",
-        "polygon": "🟣",
+        "polygon": "⬡",
+        "base": "🔵",
         "avalanche": "🔺",
         "arbitrum": "🔷",
     }
@@ -260,10 +262,8 @@ def get_chain_color(chain: str) -> str:
         "aptos": "#3b82f6",     # blue-500
         "ethereum": "#6366f1",  # indigo-500
         "polygon": "#8b5cf6",   # purple-500
+        "base": "#3b82f6",      # blue-500
         "avalanche": "#ef4444", # red-500
         "arbitrum": "#0ea5e9",  # sky-500
     }
     return colors.get(chain.lower(), "#6b7280")  # gray-500 default
-
-
-import math  # Add this at the top with other imports

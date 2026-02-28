@@ -1,4 +1,5 @@
 # app/routers/transactions.py
+import logging
 from fastapi import APIRouter, HTTPException, Path, Query, Depends
 from fastapi.responses import StreamingResponse
 from typing import List, Dict, Any, Optional
@@ -11,8 +12,9 @@ from app.services.cache import cache
 from app.services.transaction_parser import TransactionParser
 from app.deps import get_current_user, get_current_user_optional
 from app.services.wallet_service import list_user_wallets
-from app.services.adapters import get_adapter_for_chain  # ← NEW
+from app.services.adapters import get_adapter_for_chain
 
+logger = logging.getLogger("chainlens.routers.transactions")
 router = APIRouter()
 
 
@@ -47,17 +49,26 @@ def get_transactions(
         adapter = get_adapter_for_chain(chain)
         normalized_addr = adapter.normalize_address(address)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("Unsupported chain '%s' for transactions: %s", chain, e)
+        return {
+            "transactions": [],
+            "total": 0,
+            "offset": offset,
+            "limit": limit,
+            "has_more": False,
+            "chain": chain,
+            "message": f"Transaction history is not yet supported for chain '{chain}'."
+        }
     
     # Build cache key with filters
     cache_key = f"transactions:{chain}:{normalized_addr}:{limit}:{offset}:{type_filter}:{status_filter}:{search}:{date_from}:{date_to}"
     cached = cache.get(cache_key)
     if cached:
-        print(f"[CACHE] Returning cached transactions for {normalized_addr} on {chain}")
+        logger.debug("Returning cached transactions for %s on %s", normalized_addr, chain)
         return cached
-    
+
     try:
-        print(f"[INFO] Fetching transactions for {normalized_addr} on {chain}...")
+        logger.info("Fetching transactions for %s on %s...", normalized_addr, chain)
         
         # Use adapter to get transactions
         raw_txns = adapter.get_transactions(normalized_addr, limit=min(100, limit * 3), offset=offset)
@@ -74,12 +85,12 @@ def get_transactions(
                 parsed = parser.parse_transaction(txn)
                 transactions.append(parsed)
             
-            print(f"[INFO] Parsed {len(transactions)} Aptos user transactions")
-        
+            logger.info("Parsed %d Aptos user transactions", len(transactions))
+
         else:  # Solana
             # Solana transactions from adapter are already simplified
             transactions = raw_txns
-            print(f"[INFO] Received {len(transactions)} Solana transactions")
+            logger.info("Received %d Solana transactions", len(transactions))
         
         # Apply filters
         filtered_txns = transactions
@@ -133,9 +144,9 @@ def get_transactions(
         cache.set(cache_key, result, 30)
         
         return result
-        
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch transactions: {e}")
+
+    except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
+        logger.error("Failed to fetch transactions: %s", e)
         
         # Return empty result instead of error for 404
         if "404" in str(e):
@@ -208,8 +219,8 @@ def get_transaction_detail(
             status_code=502,
             detail=f"Failed to fetch transaction: HTTP {e.response.status_code}"
         )
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch transaction detail: {e}")
+    except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+        logger.error("Failed to fetch transaction detail: %s", e)
         raise HTTPException(
             status_code=502,
             detail=f"Failed to fetch transaction: {str(e)}"
@@ -266,7 +277,8 @@ def export_transactions_csv(
                 timestamp_str = dt.strftime("%Y-%m-%d %H:%M:%S")
             else:
                 timestamp_str = "N/A"
-        except:
+        except (ValueError, TypeError, OSError) as e:
+            logger.debug("Failed to parse timestamp: %s", e)
             timestamp_str = str(timestamp_val) if timestamp_val else "N/A"
         
         writer.writerow([
@@ -354,8 +366,8 @@ def get_transaction_summary(
             summary["by_wallet"].append(wallet_summary)
             summary["total_transactions"] += len(txns)
             
-        except Exception as e:
-            print(f"[ERROR] Failed to get transactions for {addr} on {chain}: {e}")
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError, RuntimeError) as e:
+            logger.error("Failed to get transactions for %s on %s: %s", addr, chain, e)
             continue
     
     # Calculate success rate
@@ -400,8 +412,8 @@ def apply_date_filters(transactions: List[Dict[str, Any]], date_from: Optional[s
             
             filtered.append(txn)
             
-        except Exception as e:
-            print(f"[WARN] Failed to parse date for txn: {e}")
+        except (ValueError, TypeError, OSError) as e:
+            logger.warning("Failed to parse date for txn: %s", e)
             filtered.append(txn)  # Include if date parsing fails
     
     return filtered

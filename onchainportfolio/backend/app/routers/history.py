@@ -8,7 +8,9 @@ from bson import ObjectId
 
 from app.services.history_service import HistoryService
 from app.services.snapshot_service import SnapshotService
+from app.services.cache import cache
 from app.deps import get_current_user, price_service
+from app.config import settings
 
 router = APIRouter()
 
@@ -187,6 +189,7 @@ async def get_detailed_portfolio_history(
     from app.services.db import wallets_collection, snapshots_collection
     from app.services.adapters.aptos_adapter import AptosAdapter
     from app.services.adapters.solana_adapter import SolanaAdapter
+    from app.services.adapters import get_adapter_for_chain, is_evm_chain
     import os
     
     user_id = str(current_user["_id"])
@@ -310,29 +313,59 @@ async def get_detailed_portfolio_history(
     print(f"[HISTORY]   Earliest wallet: {earliest_date.strftime('%Y-%m-%d')}")
     print(f"[HISTORY]   Requested: {days} days, showing: {actual_days} days")
     
-    # Initialize adapters
-    aptos_rpc = os.getenv("APTOS_RPC_URL", "https://fullnode.testnet.aptoslabs.com/v1")
-    solana_rpc = os.getenv("SOLANA_RPC_URL", "https://api.testnet.solana.com")
-    
+    # Initialize adapters — use mainnet by default (testnet wallets have no real value)
+    aptos_rpc = os.getenv("APTOS_RPC_URL", "https://fullnode.mainnet.aptoslabs.com/v1")
+    solana_rpc = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+
     aptos_client = AptosAdapter(rpc_url=aptos_rpc)
     solana_client = SolanaAdapter(rpc_url=solana_rpc)
-    
+
+    # EVM chains to expand "evm" into
+    EVM_TESTNET_CHAINS = ["ethereum_sepolia", "polygon_amoy", "base_sepolia"]
+
     # Calculate portfolio value for EACH wallet
     wallet_values: Dict[str, float] = {}
     all_balances = []
-    
+
     for wallet_doc in wallets:
         wallet_id_str = str(wallet_doc["_id"])
         address = wallet_doc.get("address")
         chain = wallet_doc.get("chain", "aptos")
-        
+
         print(f"[HISTORY] Processing wallet: {wallet_doc.get('label')} ({chain})")
-        
+
+        # Check shared cache for recently fetched balances (e.g., from multi-wallet endpoint)
+        balance_cache_key = f"balances:{chain}:{address}"
+        cached_balances = cache.get(balance_cache_key)
+
         try:
-            if chain == "aptos":
+            if cached_balances is not None:
+                print(f"[HISTORY]   ✓ Using cached balances for {chain}:{address[:10]}...")
+                balances = cached_balances if isinstance(cached_balances, list) else []
+            elif chain == "aptos":
                 balances = aptos_client.get_token_balances(address)
             elif chain == "solana":
                 balances = solana_client.get_token_balances(address)
+            elif chain == "evm" or is_evm_chain(chain):
+                # For "evm" wallets, query all EVM testnet chains
+                # For specific EVM chains (e.g., "ethereum_sepolia"), query just that one
+                evm_chains = EVM_TESTNET_CHAINS if chain == "evm" else [chain]
+                balances = []
+                for evm_chain in evm_chains:
+                    try:
+                        evm_cache_key = f"balances:{evm_chain}:{address}"
+                        evm_cached = cache.get(evm_cache_key)
+                        if evm_cached is not None:
+                            print(f"[HISTORY]   ✓ Using cached balances for {evm_chain}")
+                            chain_balances = evm_cached if isinstance(evm_cached, list) else []
+                        else:
+                            adapter = get_adapter_for_chain(evm_chain)
+                            chain_balances = adapter.get_token_balances(address)
+                        for bal in chain_balances:
+                            bal["chain"] = evm_chain
+                        balances.extend(chain_balances)
+                    except Exception as evm_err:
+                        print(f"[HISTORY]   ⚠ Failed to fetch from {evm_chain}: {evm_err}")
             else:
                 print(f"[WARNING] Unknown chain: {chain}")
                 continue

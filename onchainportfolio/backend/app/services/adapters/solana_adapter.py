@@ -1,10 +1,13 @@
 # app/services/adapters/solana_adapter.py
 import httpx
 import base58
+import logging
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 
 from .base import ChainAdapter
+
+logger = logging.getLogger("chainlens.adapters.solana")
 
 
 class SolanaAdapter(ChainAdapter):
@@ -89,7 +92,8 @@ class SolanaAdapter(ChainAdapter):
             if len(decoded) != 32:
                 return False, "Invalid Solana address length after decoding"
             return True, None
-        except Exception:
+        except (ValueError, TypeError) as e:
+            logger.debug("Base58 decode failed for address: %s", e)
             return False, "Invalid base58 encoding"
     
     def normalize_address(self, address: str) -> str:
@@ -128,23 +132,23 @@ class SolanaAdapter(ChainAdapter):
             
             return data.get("result")
         
-        except Exception as e:
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
             # Try backup RPC if primary fails
             if self.backup_rpc_url:
                 try:
-                    print(f"[WARN] Primary RPC failed, trying backup...")
+                    logger.warning("Primary RPC failed, trying backup...")
                     response = self._client.post(self.backup_rpc_url, json=payload)
                     response.raise_for_status()
                     data = response.json()
-                    
+
                     if "error" in data:
-                        raise Exception(f"RPC error: {data['error']}")
-                    
+                        raise RuntimeError(f"RPC error: {data['error']}")
+
                     return data.get("result")
-                except Exception as backup_error:
-                    print(f"[ERROR] Backup RPC also failed: {backup_error}")
-            
-            raise Exception(f"Solana RPC call failed: {e}")
+                except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as backup_error:
+                    logger.error("Backup RPC also failed: %s", backup_error)
+
+            raise RuntimeError(f"Solana RPC call failed: {e}")
     
     # ============================================================
     # Balance Fetching
@@ -174,10 +178,36 @@ class SolanaAdapter(ChainAdapter):
                 # For now, we'll get all token accounts and find the right one
                 return None  # Implement if needed
         
-        except Exception as e:
-            print(f"[ERROR] Failed to get Solana balance: {e}")
+        except (RuntimeError, httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
+            logger.error("Failed to get Solana balance: %s", e)
             return None
-    
+
+    def get_native_balance(self, address: str) -> Optional[Dict[str, Any]]:
+        """
+        Get native SOL balance.
+
+        Args:
+            address: Solana address
+
+        Returns:
+            Balance dictionary or None if error
+        """
+        addr = self.normalize_address(address)
+        balance_raw = self.get_balance(addr)
+
+        if balance_raw is None:
+            return None
+
+        amount = self.normalize_amount(str(balance_raw), 9)
+        return {
+            "symbol": "SOL",
+            "address": "So11111111111111111111111111111111111111112",
+            "decimals": 9,
+            "raw": str(balance_raw),
+            "amount": float(amount),
+            "chain": "solana"
+        }
+
     def get_token_balances(self, address: str) -> List[Dict[str, Any]]:
         """
         Get all SPL token balances for Solana address.
@@ -239,12 +269,12 @@ class SolanaAdapter(ChainAdapter):
                         "is_native": False
                     })
                 
-                except Exception as e:
-                    print(f"[WARN] Failed to parse token account: {e}")
+                except (ValueError, KeyError, TypeError) as e:
+                    logger.warning("Failed to parse token account: %s", e)
                     continue
-        
-        except Exception as e:
-            print(f"[ERROR] Failed to get Solana token balances: {e}")
+
+        except (RuntimeError, httpx.HTTPError, httpx.TimeoutException) as e:
+            logger.error("Failed to get Solana token balances: %s", e)
         
         return balances
     
@@ -317,8 +347,8 @@ class SolanaAdapter(ChainAdapter):
             
             return transactions
         
-        except Exception as e:
-            print(f"[ERROR] Failed to get Solana transactions: {e}")
+        except (RuntimeError, httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            logger.error("Failed to get Solana transactions: %s", e)
             return []
     
     # ============================================================
@@ -333,5 +363,6 @@ class SolanaAdapter(ChainAdapter):
         """Cleanup on deletion."""
         try:
             self.close()
-        except:
+        except Exception:
+            # Ignore cleanup errors during garbage collection
             pass

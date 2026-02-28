@@ -1,71 +1,94 @@
 @import "tailwindcss";
 
-/* Professional Dark Theme - Tailwind v4 Compatible */
-
-/* Custom scrollbar - Using standard CSS instead of @apply */
+/* ─── Scrollbar ──────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: rgb(156 163 175); /* gray-400 */
+  background: #3f3f46; /* zinc-700 — readable on dark bg */
   border-radius: 9999px;
 }
-
-.dark ::-webkit-scrollbar-thumb {
-  background: rgb(75 85 99); /* gray-600 */
-}
-
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(107 114 128); /* gray-500 */
+  background: #52525b; /* zinc-600 */
 }
 
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgb(107 114 128); /* gray-500 */
-}
-
-/* Focus styles */
-*:focus-visible {
-  outline: 2px solid rgb(59 130 246); /* blue-500 */
-  outline-offset: 2px;
-}
-
-.dark *:focus-visible {
-  outline: 2px solid rgb(59 130 246); /* blue-500 */
-  outline-offset: 2px;
-}
-
-/* Better text rendering */
+/* ─── Text rendering ─────────────────────────────────────────────────────── */
 body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Prevent blue flash on touch highlight */
+  -webkit-tap-highlight-color: transparent;
 }
 
-/* Animations */
+/* ─── Focus ring ─────────────────────────────────────────────────────────── */
+*:focus-visible {
+  outline: 2px solid #3b82f6; /* blue-500 */
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ─── Selection ──────────────────────────────────────────────────────────── */
+::selection {
+  background: rgba(59, 130, 246, 0.3);
+  color: inherit;
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────────── */
 @keyframes slideIn {
-  from {
-    transform: translateY(10px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
+}
+.animate-slide-in { animation: slideIn 0.25s ease-out; }
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    #27272a 25%,   /* zinc-800 */
+    #3f3f46 50%,   /* zinc-700 */
+    #27272a 75%    /* zinc-800 */
+  );
+  background-size: 200% auto;
+  animation: shimmer 1.6s linear infinite;
 }
 
-.animate-slide-in {
-  animation: slideIn 0.3s ease-out;
+@keyframes fadeUp {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.animate-fade-up { animation: fadeUp 0.35s ease-out both; }
+
+/* ─── Glassmorphism utility ──────────────────────────────────────────────── */
+.glass-dark {
+  background: rgba(24, 24, 27, 0.80);   /* zinc-950/80 */
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(63, 63, 70, 0.60); /* zinc-700/60 */
+}
+.glass-card {
+  background: rgba(39, 39, 42, 0.70);   /* zinc-800/70 */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(63, 63, 70, 0.50);
 }
 
-/* Gradient text */
+/* ─── Gradient text ──────────────────────────────────────────────────────── */
 .gradient-text {
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
-  background-image: linear-gradient(to right, rgb(59 130 246), rgb(168 85 247));
+  background-image: linear-gradient(to right, #3b82f6, #a855f7);
 }
+
+/* ─── Table improvements ─────────────────────────────────────────────────── */
+table { border-collapse: collapse; }
+
+/* ─── Smooth page content transitions ───────────────────────────────────── */
+main > * { animation: fadeUp 0.3s ease-out both; }

@@ -1,90 +1,72 @@
-// src/components/EmailPreferencesModal.tsx - FIXED: Correct API Endpoints
+// src/components/EmailPreferencesModal.tsx
 import React, { useState, useEffect } from "react";
 import { useAppContext } from "../context/AppContext";
+import { Bell, Mail, BarChart2, X, Loader2 } from "lucide-react";
 import toast from "react-hot-toast";
+import { api } from "../api";
 
 interface EmailPreferencesModalProps {
   onClose: () => void;
 }
 
-interface EmailPreferences {
-  user_id?: string;
+interface LocalEmailPreferences {
   price_alerts_enabled: boolean;
   daily_digest_enabled: boolean;
   weekly_summary_enabled: boolean;
-  updated_at?: string;
 }
+
+const PREFS_CONFIG = [
+  {
+    key: "price_alerts_enabled" as const,
+    icon: <Bell className="w-5 h-5 text-blue-400" />,
+    iconBg: "bg-blue-500/10",
+    label: "Price Alerts",
+    desc: "Receive emails when your price alerts are triggered",
+  },
+  {
+    key: "daily_digest_enabled" as const,
+    icon: <Mail className="w-5 h-5 text-emerald-400" />,
+    iconBg: "bg-emerald-500/10",
+    label: "Daily Digest",
+    desc: "Daily summary of your portfolio performance (9 AM)",
+  },
+  {
+    key: "weekly_summary_enabled" as const,
+    icon: <BarChart2 className="w-5 h-5 text-purple-400" />,
+    iconBg: "bg-purple-500/10",
+    label: "Weekly Summary",
+    desc: "Weekly portfolio report every Sunday at 9 AM",
+  },
+];
 
 const EmailPreferencesModal: React.FC<EmailPreferencesModalProps> = ({ onClose }) => {
   const { theme } = useAppContext();
-  
-  const [preferences, setPreferences] = useState<EmailPreferences>({
+  const isDark = theme === "dark";
+
+  const [preferences, setPreferences] = useState<LocalEmailPreferences>({
     price_alerts_enabled: true,
     daily_digest_enabled: true,
     weekly_summary_enabled: true,
   });
-  
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Get auth token
-  const getAuthToken = (): string => {
-    const userStr = localStorage.getItem("user");
-    if (!userStr) return "";
-    try {
-      const user = JSON.parse(userStr);
-      return user.access_token || "";
-    } catch {
-      return "";
-    }
-  };
-
-  // Load current preferences
-  useEffect(() => {
-    loadPreferences();
-  }, []);
+  useEffect(() => { loadPreferences(); }, []);
 
   const loadPreferences = async () => {
     setLoading(true);
     setError(null);
-
     try {
-      // ✅ FIXED: Correct endpoint
-      const response = await fetch("http://localhost:8000/v1/alerts/preferences/email", {
-        headers: {
-          "Authorization": `Bearer ${getAuthToken()}`,
-        },
-      });
-
-      if (!response.ok) {
-        // If 404, use defaults (preferences not created yet)
-        if (response.status === 404) {
-          setPreferences({
-            price_alerts_enabled: true,
-            daily_digest_enabled: true,
-            weekly_summary_enabled: true,
-          });
-          setLoading(false);
-          return;
-        }
-        throw new Error("Failed to load preferences");
-      }
-
-      const data = await response.json();
+      const data = await api.getEmailPreferences();
       setPreferences({
-        price_alerts_enabled: data.price_alerts_enabled ?? true,
-        daily_digest_enabled: data.daily_digest_enabled ?? true,
-        weekly_summary_enabled: data.weekly_summary_enabled ?? true,
+        price_alerts_enabled: data.email_enabled ?? true,
+        daily_digest_enabled: data.daily_digest ?? true,
+        weekly_summary_enabled: data.weekly_summary ?? true,
       });
-    } catch (err: any) {
-      console.error("Failed to load preferences:", err);
-      // Don't show error, just use defaults
-      setPreferences({
-        price_alerts_enabled: true,
-        daily_digest_enabled: true,
-        weekly_summary_enabled: true,
-      });
+    } catch {
+      setPreferences({ price_alerts_enabled: true, daily_digest_enabled: true, weekly_summary_enabled: true });
     } finally {
       setLoading(false);
     }
@@ -94,35 +76,16 @@ const EmailPreferencesModal: React.FC<EmailPreferencesModalProps> = ({ onClose }
     setSaving(true);
     setError(null);
     const toastId = toast.loading("Saving preferences...");
-
     try {
-      // ✅ FIXED: Correct endpoint and method (PUT, not POST)
-      const response = await fetch("http://localhost:8000/v1/alerts/preferences/email", {
-        method: "PUT",
-        headers: {
-          "Authorization": `Bearer ${getAuthToken()}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          price_alerts_enabled: preferences.price_alerts_enabled,
-          daily_digest_enabled: preferences.daily_digest_enabled,
-          weekly_summary_enabled: preferences.weekly_summary_enabled,
-        }),
+      await api.updateEmailPreferences({
+        email_enabled: preferences.price_alerts_enabled,
+        daily_digest: preferences.daily_digest_enabled,
+        weekly_summary: preferences.weekly_summary_enabled,
+        instant_alerts: true,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Failed to save preferences");
-      }
-
       toast.success("Preferences saved!", { id: toastId });
-      
-      // Close modal after short delay
-      setTimeout(() => {
-        onClose();
-      }, 500);
+      setTimeout(onClose, 400);
     } catch (err: any) {
-      console.error("Failed to save preferences:", err);
       toast.error(err.message || "Failed to save preferences", { id: toastId });
       setError(err.message || "Failed to save preferences");
     } finally {
@@ -130,238 +93,134 @@ const EmailPreferencesModal: React.FC<EmailPreferencesModalProps> = ({ onClose }
     }
   };
 
-  const handleToggle = (key: keyof EmailPreferences) => {
-    setPreferences(prev => ({
-      ...prev,
-      [key]: !prev[key]
-    }));
+  const handleToggle = (key: keyof LocalEmailPreferences) => {
+    setPreferences(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Modal */}
-      <div
-        className={`relative w-full max-w-lg rounded-xl shadow-2xl ${
-          theme === "dark"
-            ? "bg-slate-800 border border-slate-700"
-            : "bg-white border border-slate-200"
-        }`}
-      >
+      <div className={`relative w-full max-w-md rounded-2xl shadow-2xl ${
+        isDark
+          ? "bg-zinc-900 border border-zinc-700/60"
+          : "bg-white border border-gray-200"
+      }`}>
+
         {/* Header */}
-        <div className={`px-6 py-4 border-b ${
-          theme === "dark" ? "border-slate-700" : "border-slate-200"
+        <div className={`flex items-center justify-between px-6 py-4 border-b ${
+          isDark ? "border-zinc-700/60" : "border-gray-200"
         }`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className={`text-xl font-bold ${
-                theme === "dark" ? "text-white" : "text-slate-900"
-              }`}>
-                Email Preferences
-              </h3>
-              <p className={`text-sm mt-1 ${
-                theme === "dark" ? "text-slate-400" : "text-slate-600"
-              }`}>
-                Manage your notification settings
-              </p>
-            </div>
-            <button
-              onClick={onClose}
-              className={`p-2 rounded-lg transition-colors ${
-                theme === "dark"
-                  ? "hover:bg-slate-700 text-slate-400"
-                  : "hover:bg-slate-100 text-slate-600"
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+          <div>
+            <h3 className={`text-lg font-bold ${isDark ? "text-zinc-100" : "text-gray-900"}`}>
+              Email Preferences
+            </h3>
+            <p className={`text-xs mt-0.5 ${isDark ? "text-zinc-500" : "text-gray-500"}`}>
+              Manage your notification settings
+            </p>
           </div>
+          <button
+            onClick={onClose}
+            className={`p-2 rounded-xl transition-colors ${
+              isDark ? "hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200" : "hover:bg-gray-100 text-gray-500"
+            }`}
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Content */}
         <div className="p-6">
-          {/* Loading State */}
-          {loading && (
-            <div className="flex justify-center py-8">
-              <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          {loading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="w-7 h-7 animate-spin text-blue-500" />
             </div>
-          )}
+          ) : (
+            <div className="space-y-3">
+              {error && (
+                <div className="mb-2 rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
+                  {error}
+                </div>
+              )}
 
-          {/* Error Message */}
-          {error && (
-            <div className="mb-4 rounded-lg bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-400">
-              {error}
-            </div>
-          )}
+              {PREFS_CONFIG.map(({ key, icon, iconBg, label, desc }) => (
+                <div
+                  key={key}
+                  className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${
+                    isDark
+                      ? "bg-zinc-800/50 border-zinc-700/60 hover:border-zinc-600"
+                      : "bg-gray-50 border-gray-200 hover:border-gray-300"
+                  }`}
+                >
+                  {/* Icon */}
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
+                    {icon}
+                  </div>
 
-          {/* Preferences */}
-          {!loading && (
-            <div className="space-y-4">
-              {/* Price Alerts */}
-              <div className={`p-4 rounded-lg border ${
-                theme === "dark" ? "border-slate-700 bg-slate-900/50" : "border-slate-200 bg-slate-50"
-              }`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">🔔</span>
-                      <h4 className={`font-semibold ${
-                        theme === "dark" ? "text-white" : "text-slate-900"
-                      }`}>
-                        Price Alerts
-                      </h4>
-                    </div>
-                    <p className={`text-sm mt-1 ${
-                      theme === "dark" ? "text-slate-400" : "text-slate-600"
-                    }`}>
-                      Receive emails when your price alerts are triggered
+                  {/* Text */}
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-semibold ${isDark ? "text-zinc-100" : "text-gray-900"}`}>
+                      {label}
+                    </p>
+                    <p className={`text-xs mt-0.5 ${isDark ? "text-zinc-500" : "text-gray-500"}`}>
+                      {desc}
                     </p>
                   </div>
-                  
+
+                  {/* Toggle */}
                   <button
-                    onClick={() => handleToggle('price_alerts_enabled')}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      preferences.price_alerts_enabled
-                        ? "bg-blue-600"
-                        : theme === "dark"
-                        ? "bg-slate-700"
-                        : "bg-slate-300"
+                    onClick={() => handleToggle(key)}
+                    role="switch"
+                    aria-checked={preferences[key]}
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none ${
+                      preferences[key] ? "bg-blue-600" : isDark ? "bg-zinc-700" : "bg-gray-300"
                     }`}
                   >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        preferences.price_alerts_enabled ? "translate-x-6" : "translate-x-1"
-                      }`}
-                    />
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                      preferences[key] ? "translate-x-6" : "translate-x-1"
+                    }`} />
                   </button>
                 </div>
-              </div>
+              ))}
 
-              {/* Daily Digest */}
-              <div className={`p-4 rounded-lg border ${
-                theme === "dark" ? "border-slate-700 bg-slate-900/50" : "border-slate-200 bg-slate-50"
+              {/* Info note */}
+              <div className={`mt-4 px-4 py-3 rounded-xl text-xs ${
+                isDark ? "bg-blue-500/10 text-blue-300 border border-blue-500/20" : "bg-blue-50 text-blue-700"
               }`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">📧</span>
-                      <h4 className={`font-semibold ${
-                        theme === "dark" ? "text-white" : "text-slate-900"
-                      }`}>
-                        Daily Digest
-                      </h4>
-                    </div>
-                    <p className={`text-sm mt-1 ${
-                      theme === "dark" ? "text-slate-400" : "text-slate-600"
-                    }`}>
-                      Daily summary of your portfolio performance (9 AM)
-                    </p>
-                  </div>
-                  
-                  <button
-                    onClick={() => handleToggle('daily_digest_enabled')}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      preferences.daily_digest_enabled
-                        ? "bg-blue-600"
-                        : theme === "dark"
-                        ? "bg-slate-700"
-                        : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        preferences.daily_digest_enabled ? "translate-x-6" : "translate-x-1"
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Weekly Summary */}
-              <div className={`p-4 rounded-lg border ${
-                theme === "dark" ? "border-slate-700 bg-slate-900/50" : "border-slate-200 bg-slate-50"
-              }`}>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">📊</span>
-                      <h4 className={`font-semibold ${
-                        theme === "dark" ? "text-white" : "text-slate-900"
-                      }`}>
-                        Weekly Summary
-                      </h4>
-                    </div>
-                    <p className={`text-sm mt-1 ${
-                      theme === "dark" ? "text-slate-400" : "text-slate-600"
-                    }`}>
-                      Weekly portfolio report every Sunday at 9 AM
-                    </p>
-                  </div>
-                  
-                  <button
-                    onClick={() => handleToggle('weekly_summary_enabled')}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      preferences.weekly_summary_enabled
-                        ? "bg-blue-600"
-                        : theme === "dark"
-                        ? "bg-slate-700"
-                        : "bg-slate-300"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        preferences.weekly_summary_enabled ? "translate-x-6" : "translate-x-1"
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* Info Note */}
-              <div className={`p-3 rounded-lg text-xs ${
-                theme === "dark" ? "bg-blue-500/10 text-blue-300" : "bg-blue-50 text-blue-700"
-              }`}>
-                💡 You can change these settings anytime. All emails include an unsubscribe link.
+                All emails include an unsubscribe link. Changes take effect immediately.
               </div>
             </div>
           )}
         </div>
 
-        {/* Actions */}
-        <div className={`px-6 py-4 border-t flex gap-3 ${
-          theme === "dark" ? "border-slate-700" : "border-slate-200"
+        {/* Footer */}
+        <div className={`flex gap-3 px-6 py-4 border-t ${
+          isDark ? "border-zinc-700/60" : "border-gray-200"
         }`}>
           <button
             onClick={onClose}
             disabled={saving}
-            className={`flex-1 px-6 py-3 rounded-lg font-medium transition-colors ${
-              theme === "dark"
-                ? "bg-slate-700 text-slate-300 hover:bg-slate-600"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-            } disabled:opacity-50`}
+            className={`flex-1 px-5 py-2.5 rounded-xl font-medium text-sm transition-colors disabled:opacity-50 ${
+              isDark
+                ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+            }`}
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving || loading}
-            className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex-1 px-5 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {saving ? (
-              <div className="flex items-center justify-center gap-2">
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Saving...</span>
-              </div>
-            ) : (
-              "Save Preferences"
-            )}
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Saving…
+              </span>
+            ) : "Save Preferences"}
           </button>
         </div>
       </div>

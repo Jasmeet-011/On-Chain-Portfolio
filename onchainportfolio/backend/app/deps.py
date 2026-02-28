@@ -23,8 +23,11 @@ from app.services.adapters import get_adapter_for_chain, AptosAdapter, SolanaAda
 # Create default Aptos adapter (for backward compatibility)
 aptos_client = get_adapter_for_chain("aptos", rpc_url=settings.aptos_node_url)
 
-# Price service (now supports both chains)
-price_service = PriceService(ttl_seconds=settings.prices_ttl_seconds)
+# Price service (now supports both chains + CoinGecko API key for higher rate limits)
+price_service = PriceService(
+    ttl_seconds=settings.prices_ttl_seconds,
+    coingecko_api_key=settings.coingecko_api_key,
+)
 
 # AI service (uncomment if using)
 # from app.services.ai_service import AIService

@@ -37,8 +37,8 @@ class EmailService:
         self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
         self.smtp_user = os.getenv("SMTP_USER", "")
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.from_email = os.getenv("FROM_EMAIL", "alerts@chainiq.app")
-        self.from_name = os.getenv("FROM_NAME", "ChainIQ Alerts")
+        self.from_email = os.getenv("FROM_EMAIL", "alerts@chainlens.app")
+        self.from_name = os.getenv("FROM_NAME", "ChainLens Alerts")
         
         # Check if SMTP is configured
         self.smtp_enabled = bool(self.smtp_host and self.smtp_user and self.smtp_password)
@@ -124,12 +124,12 @@ class EmailService:
                     </div>
                     
                     <p style="text-align: center;">
-                        <a href="https://chainiq.app/alerts" class="btn">View All Alerts</a>
+                        <a href="https://chainlens.app/alerts" class="btn">View All Alerts</a>
                     </p>
                 </div>
                 <div class="footer">
-                    <p>You received this email because you set up a price alert on ChainIQ.</p>
-                    <p>To manage your alerts, visit your <a href="https://chainiq.app/alerts">alerts dashboard</a>.</p>
+                    <p>You received this email because you set up a price alert on ChainLens.</p>
+                    <p>To manage your alerts, visit your <a href="https://chainlens.app/alerts">alerts dashboard</a>.</p>
                 </div>
             </div>
         </body>
@@ -150,10 +150,10 @@ Target: {direction} ${data.target_price:.4f}
 Chain: {data.chain.upper()}
 Alert Type: {'Recurring' if data.is_recurring else 'One-time'}
 
-View all alerts: https://chainiq.app/alerts
+View all alerts: https://chainlens.app/alerts
 
 ---
-ChainIQ - Your Multi-Chain Portfolio Tracker
+ChainLens - Your Multi-Chain Portfolio Tracker
         """
         
         return self._send_email(
@@ -229,12 +229,12 @@ ChainIQ - Your Multi-Chain Portfolio Tracker
                     </div>
                     
                     <p style="text-align: center;">
-                        <a href="https://chainiq.app" class="btn">View Full Portfolio</a>
+                        <a href="https://chainlens.app" class="btn">View Full Portfolio</a>
                     </p>
                 </div>
                 <div class="footer">
                     <p>You're receiving this daily digest because you enabled it in your settings.</p>
-                    <p><a href="https://chainiq.app/alerts">Manage email preferences</a></p>
+                    <p><a href="https://chainlens.app/alerts">Manage email preferences</a></p>
                 </div>
             </div>
         </body>
@@ -252,10 +252,10 @@ Portfolio Value: ${data.portfolio_value:,.2f}
 Top Gainer: {data.top_gainer.get('symbol', 'N/A') if data.top_gainer else 'N/A'} (+{data.top_gainer.get('change_percent', 0):.2f}%)
 Top Loser: {data.top_loser.get('symbol', 'N/A') if data.top_loser else 'N/A'} ({data.top_loser.get('change_percent', 0):.2f}%)
 
-View portfolio: https://chainiq.app
+View portfolio: https://chainlens.app
 
 ---
-ChainIQ - Your Multi-Chain Portfolio Tracker
+ChainLens - Your Multi-Chain Portfolio Tracker
         """
         
         return self._send_email(
@@ -324,11 +324,11 @@ ChainIQ - Your Multi-Chain Portfolio Tracker
                     </div>
                     
                     <p style="text-align: center;">
-                        <a href="https://chainiq.app/analytics" class="btn">View Analytics</a>
+                        <a href="https://chainlens.app/analytics" class="btn">View Analytics</a>
                     </p>
                 </div>
                 <div class="footer">
-                    <p><a href="https://chainiq.app/alerts">Manage email preferences</a></p>
+                    <p><a href="https://chainlens.app/alerts">Manage email preferences</a></p>
                 </div>
             </div>
         </body>
@@ -344,10 +344,10 @@ Current Value: ${data.portfolio_value_end:,.2f}
 Weekly Change: {'+' if data.change_percent >= 0 else ''}{data.change_percent:.2f}%
 Alerts Triggered: {data.alerts_triggered}
 
-View analytics: https://chainiq.app/analytics
+View analytics: https://chainlens.app/analytics
 
 ---
-ChainIQ
+ChainLens
         """
         
         return self._send_email(
@@ -391,11 +391,11 @@ ChainIQ
                     <div class="price">${data.current_price:,.4f}</div>
                     {f'<p>Previous record: ${data.previous_record:,.4f}</p>' if data.previous_record else ''}
                     <p style="margin-top: 30px;">
-                        <a href="https://chainiq.app" class="btn">View Portfolio</a>
+                        <a href="https://chainlens.app" class="btn">View Portfolio</a>
                     </p>
                 </div>
                 <div class="footer">
-                    <p><a href="https://chainiq.app/alerts">Manage notifications</a></p>
+                    <p><a href="https://chainlens.app/alerts">Manage notifications</a></p>
                 </div>
             </div>
         </body>
@@ -412,10 +412,10 @@ Hi {data.user_name},
 Current Price: ${data.current_price:,.4f}
 {f'Previous Record: ${data.previous_record:,.4f}' if data.previous_record else ''}
 
-View portfolio: https://chainiq.app
+View portfolio: https://chainlens.app
 
 ---
-ChainIQ
+ChainLens
         """
         
         return self._send_email(
@@ -426,13 +426,81 @@ ChainIQ
         )
     
     # ============================================================
+    # EMAIL VERIFICATION
+    # ============================================================
+
+    def send_verification_email(self, to_email: str, user_name: str, verify_url: str) -> bool:
+        """Send an email verification link to a new user."""
+        subject = "Verify your ChainLens email address"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+                .header {{ background: linear-gradient(135deg, #18181b 0%, #27272a 100%); color: white; padding: 36px 30px; text-align: center; }}
+                .header h1 {{ margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }}
+                .header p {{ margin: 8px 0 0; opacity: 0.6; font-size: 14px; }}
+                .content {{ padding: 36px 30px; }}
+                .verify-btn {{ display: block; width: fit-content; margin: 28px auto; background: #18181b; color: white; padding: 14px 36px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; }}
+                .url-box {{ background: #f4f4f5; border-radius: 6px; padding: 12px 16px; word-break: break-all; font-size: 12px; color: #71717a; margin: 20px 0; }}
+                .footer {{ background: #f4f4f5; padding: 20px 30px; text-align: center; color: #a1a1aa; font-size: 12px; }}
+                .footer a {{ color: #71717a; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>ChainLens</h1>
+                    <p>Multi-Chain Portfolio Tracker</p>
+                </div>
+                <div class="content">
+                    <p style="font-size:16px; color:#18181b;">Hi {user_name},</p>
+                    <p style="color:#52525b;">Thanks for signing up! Please verify your email address to unlock all features including price alerts.</p>
+                    <a href="{verify_url}" class="verify-btn">Verify Email Address</a>
+                    <p style="color:#71717a; font-size:13px; text-align:center;">This link expires in 24 hours.</p>
+                    <p style="color:#a1a1aa; font-size:12px; margin-top:24px;">If the button above doesn't work, copy and paste this URL into your browser:</p>
+                    <div class="url-box">{verify_url}</div>
+                    <p style="color:#a1a1aa; font-size:12px;">If you didn't create a ChainLens account, you can safely ignore this email.</p>
+                </div>
+                <div class="footer">
+                    <p>ChainLens · <a href="https://chainlens.app">chainlens.app</a></p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        plain_content = f"""Hi {user_name},
+
+Please verify your ChainLens email address by visiting:
+{verify_url}
+
+This link expires in 24 hours.
+
+If you didn't create a ChainLens account, ignore this email.
+
+---
+ChainLens - Your Multi-Chain Portfolio Tracker
+        """
+
+        return self._send_email(
+            to_email=to_email,
+            subject=subject,
+            html_content=html_content,
+            plain_content=plain_content
+        )
+
+    # ============================================================
     # TEST EMAIL
     # ============================================================
     
     def send_test_email(self, to_email: str, user_name: str = "User") -> bool:
         """Send a test email to verify configuration"""
         
-        subject = "🧪 ChainIQ Test Email"
+        subject = "🧪 ChainLens Test Email"
         
         html_content = f"""
         <!DOCTYPE html>
@@ -460,7 +528,7 @@ ChainIQ
                     <p style="color: #666; font-size: 14px;">Sent at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
                 </div>
                 <div class="footer">
-                    <p>ChainIQ - Your Multi-Chain Portfolio Tracker</p>
+                    <p>ChainLens - Your Multi-Chain Portfolio Tracker</p>
                 </div>
             </div>
         </body>
@@ -468,7 +536,7 @@ ChainIQ
         """
         
         plain_content = f"""
-Test Email - ChainIQ
+Test Email - ChainLens
 
 Hi {user_name},
 
@@ -477,7 +545,7 @@ If you're seeing this, your email notifications are properly configured.
 Sent at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
 
 ---
-ChainIQ
+ChainLens
         """
         
         return self._send_email(

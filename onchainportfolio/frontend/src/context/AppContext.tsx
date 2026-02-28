@@ -1,4 +1,4 @@
-// src/context/AppContext.tsx - MULTI-CHAIN SUPPORT
+// src/context/AppContext.tsx - MULTI-CHAIN SUPPORT (Aptos, Solana, EVM)
 import React, {
   createContext,
   useContext,
@@ -8,22 +8,35 @@ import React, {
 } from "react";
 import type { ReactNode } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
-import { useSolanaWallet } from "./SolanaWalletProvider"; // ✅ NEW: Solana wallet
+import { useSolanaWallet } from "./SolanaWalletProvider";
+import { useEVMWallet } from "./EVMWalletProvider";
 import { api } from "../api";
 import type { WalletResponse } from "../api";
+import type { ChainType, WalletType } from "../api";
 
 export type Theme = "light" | "dark";
 
-// ✅ UPDATED: Extended WalletInfo with chain support
+// ✅ UPDATED: Extended WalletInfo with multi-chain support (Aptos, Solana, EVM)
 export interface ExtendedWalletInfo {
   id: string;
   address: string;
   label: string;
-  type: 'manual' | 'petra' | 'phantom'; // ✅ UPDATED: Added phantom
-  chain: 'aptos' | 'solana'; // ✅ NEW: Chain field
+  type: WalletType;
+  chain: ChainType;
   is_primary: boolean;
   created_at: string;
-  publicKey?: string; // For locally tracking connected wallet keys
+  publicKey?: string;
+}
+
+// Grouped wallet - represents a wallet provider with potentially multiple chain addresses
+export interface WalletGroup {
+  id: string;                    // Unique group ID (e.g., "phantom", "metamask", "petra")
+  type: WalletType;              // Provider type
+  label: string;                 // Display name (e.g., "Phantom", "MetaMask")
+  icon: string;                  // Emoji icon
+  wallets: ExtendedWalletInfo[]; // All wallets belonging to this provider
+  chains: ChainType[];           // All chains this provider supports
+  is_primary: boolean;           // Whether this group contains the primary wallet
 }
 
 export interface ChatMessage {
@@ -37,15 +50,23 @@ export interface AppContextType {
   addMessage: (msg: ChatMessage) => void;
   manualAddress: string;
   setManualAddress: (addr: string) => void;
+  // Individual wallets (raw list)
   wallets: ExtendedWalletInfo[];
   setWallets: (wallets: ExtendedWalletInfo[]) => void;
+  // Grouped wallets by provider (for UI display)
+  walletGroups: WalletGroup[];
+  activeWalletGroup: WalletGroup | null;
+  setActiveWalletGroup: (group: WalletGroup | null) => void;
+  // Legacy single wallet selection (for backward compatibility)
   activeWallet: ExtendedWalletInfo | null;
   setActiveWallet: (wallet: ExtendedWalletInfo | null) => void;
-  addWallet: (address: string, label: string, isPrimary?: boolean, type?: 'manual' | 'petra' | 'phantom', chain?: 'aptos' | 'solana', publicKey?: string) => Promise<void>;
+  // Wallet management
+  addWallet: (address: string, label: string, isPrimary?: boolean, type?: WalletType, chain?: ChainType, publicKey?: string) => Promise<void>;
   removeWallet: (address: string) => Promise<void>;
+  removeWalletGroup: (groupType: WalletType) => Promise<void>;
   updateWalletName: (address: string, label: string) => Promise<void>;
   setPrimaryWallet: (address: string) => Promise<void>;
-  connectWallet: (walletName: string, chain: 'aptos' | 'solana') => Promise<void>; // ✅ UPDATED: Added chain parameter
+  connectWallet: (walletName: string, chain: ChainType) => Promise<void>;
   disconnectConnectedWallet: (address: string) => Promise<void>;
   availableWallets: readonly any[];
   isWalletConnecting: boolean;
@@ -117,7 +138,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     if (!user || user.id !== currentUser?.id) {
       console.log("[AppContext] User changed, clearing wallet state");
       setWallets([]);
-      setActiveWallet(null);
+      setActiveWalletInternal(null);
+      setActiveWalletGroupInternal(null);
       setPortfolioData(null);
       setMessages([]);
     }
@@ -128,10 +150,89 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
   const [wallets, setWallets] = useState<ExtendedWalletInfo[]>([]);
   const [activeWallet, setActiveWalletInternal] = useState<ExtendedWalletInfo | null>(null);
-  
+  const [activeWalletGroup, setActiveWalletGroupInternal] = useState<WalletGroup | null>(null);
+
+  // Wallet provider configuration for grouping
+  const WALLET_PROVIDER_CONFIG: Record<string, { label: string; icon: string }> = {
+    petra: { label: "Petra", icon: "🔴" },
+    phantom: { label: "Phantom", icon: "👻" },
+    metamask: { label: "MetaMask", icon: "🦊" },
+    coinbase: { label: "Coinbase", icon: "🔵" },
+    manual: { label: "Manual Wallet", icon: "💼" },
+  };
+
+  // Compute wallet groups from wallets array
+  const walletGroups: WalletGroup[] = React.useMemo(() => {
+    const groupMap = new Map<string, WalletGroup>();
+
+    wallets.forEach((wallet) => {
+      const providerType = wallet.type;
+      const config = WALLET_PROVIDER_CONFIG[providerType] || { label: providerType, icon: "💼" };
+
+      if (!groupMap.has(providerType)) {
+        groupMap.set(providerType, {
+          id: providerType,
+          type: providerType as WalletType,
+          label: config.label,
+          icon: config.icon,
+          wallets: [],
+          chains: [],
+          is_primary: false,
+        });
+      }
+
+      const group = groupMap.get(providerType)!;
+      group.wallets.push(wallet);
+
+      if (!group.chains.includes(wallet.chain)) {
+        group.chains.push(wallet.chain);
+      }
+
+      if (wallet.is_primary) {
+        group.is_primary = true;
+      }
+    });
+
+    return Array.from(groupMap.values());
+  }, [wallets]);
+
+  // Set active wallet group (and set first wallet as activeWallet for compatibility)
+  const setActiveWalletGroup = useCallback((group: WalletGroup | null) => {
+    setActiveWalletGroupInternal(group);
+    if (group && group.wallets.length > 0) {
+      // Set the first wallet in the group as active for backward compatibility
+      const primaryWallet = group.wallets.find(w => w.is_primary) || group.wallets[0];
+      setActiveWalletInternal(primaryWallet);
+      setManualAddressInternal(primaryWallet.address);
+      localStorage.setItem("activeWalletGroup", group.id);
+    } else {
+      setActiveWalletInternal(null);
+      setManualAddressInternal("");
+      localStorage.removeItem("activeWalletGroup");
+    }
+  }, []);
+
+  // Remove all wallets belonging to a provider group
+  const removeWalletGroup = async (groupType: WalletType) => {
+    const walletsToRemove = wallets.filter(w => w.type === groupType);
+
+    for (const wallet of walletsToRemove) {
+      await removeWallet(wallet.address);
+    }
+
+    // If we removed the active group, select another one
+    if (activeWalletGroup?.type === groupType) {
+      const remainingGroups = walletGroups.filter(g => g.type !== groupType);
+      setActiveWalletGroup(remainingGroups[0] || null);
+    }
+  };
+
   // Wallet adapter state
   const [isWalletConnecting, setIsWalletConnecting] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
+
+  // Track wallets being added to prevent duplicates
+  const addingWalletsRef = React.useRef<Set<string>>(new Set());
 
   // ✅ Get Aptos wallet adapter hooks
   const {
@@ -143,13 +244,25 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     wallets: aptosWallets,
   } = useWallet();
 
-  // ✅ NEW: Get Solana wallet hooks
+  // Get Solana wallet hooks (with Phantom multi-chain EVM support)
   const {
     connect: solanaConnect,
     disconnect: solanaDisconnect,
     publicKey: solanaPublicKey,
     connected: solanaConnected,
+    evmAddress: phantomEvmAddress,
+    hasEvmSupport: phantomHasEvmSupport,
   } = useSolanaWallet();
+
+  // ✅ NEW: Get EVM wallet hooks
+  const {
+    connect: evmConnect,
+    disconnect: evmDisconnect,
+    address: evmAddress,
+    chainId: evmChainId,
+    connected: evmConnected,
+    walletType: evmWalletType,
+  } = useEVMWallet();
 
   const clearWalletError = useCallback(() => setWalletError(null), []);
 
@@ -173,8 +286,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // ✅ UPDATED: Connect wallet with chain parameter
-  const connectWallet = async (walletName: string, chain: 'aptos' | 'solana') => {
+  // ✅ UPDATED: Connect wallet with chain parameter (supports EVM chains)
+  const connectWallet = async (walletName: string, chain: ChainType) => {
     setIsWalletConnecting(true);
     setWalletError(null);
 
@@ -185,10 +298,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       } else if (chain === 'solana') {
         // Connect Solana wallet (Phantom)
         await solanaConnect();
+      } else if (chain === 'evm' || ['ethereum', 'polygon', 'base', 'ethereum_sepolia', 'polygon_amoy', 'base_sepolia'].includes(chain)) {
+        // Connect EVM wallet (MetaMask, Coinbase, etc.) - works on all EVM chains
+        await evmConnect();
       }
     } catch (error: any) {
       console.error("[AppContext] Failed to connect wallet:", error);
-      
+
       if (error?.message?.includes('User rejected') || error?.code === 4001) {
         setWalletError("Connection rejected. Please approve the connection in your wallet.");
       } else if (error?.message?.includes('not installed')) {
@@ -201,7 +317,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   };
 
-  // ✅ Handle Aptos wallet connection
+  // Handle Aptos wallet connection (Petra)
   useEffect(() => {
     if (!currentUser) {
       console.log("[AppContext] User not logged in, skipping Aptos wallet auto-add");
@@ -210,39 +326,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (aptosConnected && aptosAccount?.address && aptosConnectedWallet) {
       const addressStr = aptosAccount.address.toString();
-      const existingWallet = wallets.find(w => 
-        w.address.toLowerCase() === addressStr.toLowerCase() && w.chain === 'aptos'
-      );
 
-      if (!existingWallet) {
-        let publicKeyStr: string | undefined;
-        if (aptosAccount.publicKey) {
-          if (Array.isArray(aptosAccount.publicKey)) {
-            publicKeyStr = aptosAccount.publicKey[0]?.toString();
-          } else {
-            publicKeyStr = aptosAccount.publicKey.toString();
-          }
+      let publicKeyStr: string | undefined;
+      if (aptosAccount.publicKey) {
+        if (Array.isArray(aptosAccount.publicKey)) {
+          publicKeyStr = aptosAccount.publicKey[0]?.toString();
+        } else {
+          publicKeyStr = aptosAccount.publicKey.toString();
         }
+      }
 
-        // Add Aptos wallet via API
+      // Add Aptos wallet via API (addWallet handles duplicates internally)
+      const timer = setTimeout(() => {
         addWallet(
           addressStr,
           `${aptosConnectedWallet.name} Wallet`,
-          wallets.length === 0,
+          true, // Make primary
           'petra',
-          'aptos', // ✅ Specify chain
+          'aptos',
           publicKeyStr
         ).catch(err => {
-          console.error("[AppContext] Failed to add Aptos wallet:", err);
-          setWalletError("Failed to save wallet to account");
+          // Only log, don't show error (duplicate prevention may trigger this)
+          console.log("[AppContext] Aptos wallet add result:", err?.message || 'success');
         });
-      } else if (!activeWallet || activeWallet.address !== addressStr) {
-        setActiveWallet(existingWallet);
-      }
+      }, 100);
+      return () => clearTimeout(timer);
     }
-  }, [aptosConnected, aptosAccount, aptosConnectedWallet, currentUser]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aptosConnected, aptosAccount?.address, aptosConnectedWallet?.name, currentUser?.id]);
 
-  // ✅ NEW: Handle Solana wallet connection
+  // ✅ Handle Solana wallet connection (with Phantom multi-chain EVM support)
   useEffect(() => {
     if (!currentUser) {
       console.log("[AppContext] User not logged in, skipping Solana wallet auto-add");
@@ -251,36 +364,95 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (solanaConnected && solanaPublicKey) {
       const addressStr = solanaPublicKey;
-      const existingWallet = wallets.find(w => 
-        w.address.toLowerCase() === addressStr.toLowerCase() && w.chain === 'solana'
-      );
 
-      if (!existingWallet) {
-        // Add Solana wallet via API
-         const timer = setTimeout(() => {
+      // Add Solana wallet via API (addWallet handles duplicates internally)
+      const timer = setTimeout(() => {
         addWallet(
           addressStr,
-          "Phantom Wallet",
-          wallets.length === 0,
+          "Phantom (Solana)",
+          true, // Make primary
           'phantom',
           'solana',
           solanaPublicKey
         ).catch(err => {
-          console.error("[AppContext] Failed to add Solana wallet:", err);
-          setWalletError("Failed to save wallet to account");
+          // Only log, don't show error (duplicate prevention may trigger this)
+          console.log("[AppContext] Solana wallet add result:", err?.message || 'success');
         });
       }, 100);
       return () => clearTimeout(timer);
-      } else if (!activeWallet || activeWallet.address !== addressStr) {
-        setActiveWallet(existingWallet);
-      }
     }
-  }, [solanaConnected, solanaPublicKey, currentUser?.id,wallets.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solanaConnected, solanaPublicKey, currentUser?.id]);
 
-  // Disconnect a connected wallet
+  // ✅ Handle Phantom's EVM wallet (multi-chain support)
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    // Only add if Phantom has EVM support and we have an EVM address from Phantom
+    if (phantomHasEvmSupport && phantomEvmAddress && solanaConnected) {
+      console.log("[AppContext] Adding Phantom EVM wallet:", phantomEvmAddress);
+
+      const timer = setTimeout(() => {
+        addWallet(
+          phantomEvmAddress,
+          "Phantom (EVM)",
+          false, // Not primary, Solana wallet is primary
+          'phantom',
+          'evm',
+          phantomEvmAddress
+        ).catch(err => {
+          // Only log, don't show error (duplicate prevention may trigger this)
+          console.log("[AppContext] Phantom EVM wallet add result:", err?.message || 'success');
+        });
+      }, 300); // Slightly longer delay to ensure Solana wallet is added first
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phantomHasEvmSupport, phantomEvmAddress, solanaConnected, currentUser?.id]);
+
+  // ✅ Handle EVM wallet connection (MetaMask, Coinbase, etc.)
+  useEffect(() => {
+    if (!currentUser) {
+      console.log("[AppContext] User not logged in, skipping EVM wallet auto-add");
+      return;
+    }
+
+    if (evmConnected && evmAddress) {
+      // Determine wallet type and label
+      const walletTypeMap: Record<string, WalletType> = {
+        'metamask': 'metamask',
+        'coinbase': 'coinbase',
+        'unknown': 'metamask',
+      };
+      const walletType = walletTypeMap[evmWalletType || 'unknown'] || 'metamask';
+      const walletLabel = evmWalletType === 'metamask' ? 'MetaMask Wallet' :
+                          evmWalletType === 'coinbase' ? 'Coinbase Wallet' : 'EVM Wallet';
+
+      // Add EVM wallet (addWallet handles duplicates internally)
+      const timer = setTimeout(() => {
+        addWallet(
+          evmAddress,
+          walletLabel,
+          true, // Make primary if first wallet
+          walletType,
+          'evm',
+          evmAddress
+        ).catch(err => {
+          // Only log, don't show error (duplicate prevention may trigger this)
+          console.log("[AppContext] EVM wallet add result:", err?.message || 'success');
+        });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [evmConnected, evmAddress, evmWalletType, currentUser?.id]);
+
+  // Disconnect a connected wallet (supports Aptos, Solana, and EVM)
   const disconnectConnectedWallet = async (address: string) => {
     const walletToDisconnect = wallets.find(w => w.address === address);
-    
+
     if (walletToDisconnect) {
       // Disconnect from appropriate adapter
       if (walletToDisconnect.chain === 'aptos' && walletToDisconnect.type === 'petra') {
@@ -300,69 +472,101 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
             console.error("[AppContext] Error disconnecting from Solana adapter:", error);
           }
         }
+      } else if (
+        (walletToDisconnect.chain === 'evm' || ['ethereum', 'polygon', 'base', 'ethereum_sepolia', 'polygon_amoy', 'base_sepolia'].includes(walletToDisconnect.chain)) &&
+        ['metamask', 'coinbase', 'walletconnect'].includes(walletToDisconnect.type)
+      ) {
+        // EVM wallet disconnect
+        if (evmAddress?.toLowerCase() === address.toLowerCase()) {
+          try {
+            await evmDisconnect();
+          } catch (error) {
+            console.error("[AppContext] Error disconnecting from EVM adapter:", error);
+          }
+        }
       }
     }
 
     await removeWallet(address);
   };
 
-  // ✅ UPDATED: Add wallet with chain parameter
+  // ✅ UPDATED: Add wallet with chain parameter (supports EVM chains)
   const addWallet = async (
-    address: string, 
-    label: string, 
+    address: string,
+    label: string,
     isPrimary: boolean = false,
-    type: 'manual' | 'petra' | 'phantom' = 'manual',
-    chain: 'aptos' | 'solana' = 'aptos', // ✅ NEW PARAMETER
+    type: WalletType = 'manual',
+    chain: ChainType = 'aptos',
     publicKey?: string
   ) => {
+    // Create unique key for this wallet
+    const walletKey = `${chain}:${address.toLowerCase()}`;
+
+    // Check if already being added (prevent race conditions)
+    if (addingWalletsRef.current.has(walletKey)) {
+      console.log("[AppContext] Wallet already being added, skipping:", walletKey);
+      return;
+    }
+
     // Check if wallet already exists (same address AND same chain)
-    if (wallets.some(w => 
-      w.address.toLowerCase() === address.toLowerCase() && 
+    if (wallets.some(w =>
+      w.address.toLowerCase() === address.toLowerCase() &&
       w.chain === chain
     )) {
-      throw new Error("Wallet already exists on this chain");
+      console.log("[AppContext] Wallet already exists, skipping:", walletKey);
+      return;
     }
+
+    // Mark as being added
+    addingWalletsRef.current.add(walletKey);
 
     // If not logged in, store locally (for backward compatibility)
     if (!currentUser) {
-      const newWallet: ExtendedWalletInfo = {
-        id: `local_${Date.now()}`,
-        address,
-        label,
-        type,
-        chain, // ✅ NEW
-        is_primary: isPrimary || wallets.length === 0,
-        created_at: new Date().toISOString(),
-        publicKey,
-      };
+      try {
+        const localWallet: ExtendedWalletInfo = {
+          id: `local_${Date.now()}`,
+          address,
+          label,
+          type,
+          chain,
+          is_primary: isPrimary || wallets.length === 0,
+          created_at: new Date().toISOString(),
+          publicKey,
+        };
 
-      const updatedWallets = [...wallets];
-      if (newWallet.is_primary) {
-        updatedWallets.forEach(w => w.is_primary = false);
+        const updatedWallets = [...wallets];
+        if (localWallet.is_primary) {
+          updatedWallets.forEach(w => w.is_primary = false);
+        }
+        updatedWallets.push(localWallet);
+        setWallets(updatedWallets);
+
+        if (updatedWallets.length === 1 || localWallet.is_primary) {
+          setActiveWallet(localWallet);
+        }
+
+        localStorage.setItem("wallets", JSON.stringify(updatedWallets));
+      } finally {
+        addingWalletsRef.current.delete(walletKey);
       }
-      updatedWallets.push(newWallet);
-      setWallets(updatedWallets);
-
-      if (updatedWallets.length === 1 || newWallet.is_primary) {
-        setActiveWallet(newWallet);
-      }
-
-      localStorage.setItem("wallets", JSON.stringify(updatedWallets));
       return;
     }
 
     // Add to backend
     try {
       console.log("[AppContext] Adding wallet to backend:", { address, label, type, chain });
-      const newWallet = await api.addWallet(address, label, type, isPrimary, chain); // ✅ Pass chain
-      
+      await api.addWallet(address, label, type, isPrimary, chain);
+
       // Reload all wallets to get updated state
       await loadWallets();
-      
+
       console.log("[AppContext] Wallet added successfully");
     } catch (error) {
       console.error("[AppContext] Failed to add wallet:", error);
       throw error;
+    } finally {
+      // Always clear the adding flag
+      addingWalletsRef.current.delete(walletKey);
     }
   };
 
@@ -493,14 +697,14 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setMessages([]);
   };
 
-  // Logout function - Proper async handling
+  // Logout function - Proper async handling (supports all wallet types)
   const logout = useCallback(() => {
     console.log("[AppContext] Logging out user");
-    
+
     // Disconnect wallet adapters FIRST (before clearing state)
     if (aptosConnected) {
       try {
-        Promise.resolve(aptosDisconnect()).catch(err => 
+        Promise.resolve(aptosDisconnect()).catch(err =>
           console.error("[AppContext] Error disconnecting Aptos adapter:", err)
         );
       } catch (err) {
@@ -510,25 +714,36 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     if (solanaConnected) {
       try {
-        Promise.resolve(solanaDisconnect()).catch(err => 
+        Promise.resolve(solanaDisconnect()).catch(err =>
           console.error("[AppContext] Error disconnecting Solana adapter:", err)
         );
       } catch (err) {
         console.error("[AppContext] Error disconnecting Solana adapter:", err);
       }
     }
-    
+
+    // ✅ NEW: Disconnect EVM wallets
+    if (evmConnected) {
+      try {
+        Promise.resolve(evmDisconnect()).catch(err =>
+          console.error("[AppContext] Error disconnecting EVM adapter:", err)
+        );
+      } catch (err) {
+        console.error("[AppContext] Error disconnecting EVM adapter:", err);
+      }
+    }
+
     // Clear user from context (this triggers state cleanup via setCurrentUser wrapper)
     setCurrentUser(null);
-    
+
     // Clear localStorage
     localStorage.removeItem("user");
     localStorage.removeItem("wallets");
     localStorage.removeItem("activeWalletAddress");
     localStorage.removeItem("walletAddress");
-    
+
     console.log("[AppContext] Logout complete");
-  }, [aptosConnected, solanaConnected, aptosDisconnect, solanaDisconnect, setCurrentUser]);
+  }, [aptosConnected, solanaConnected, evmConnected, aptosDisconnect, solanaDisconnect, evmDisconnect, setCurrentUser]);
 
   // Load wallets on mount or when user changes
   useEffect(() => {
@@ -573,6 +788,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     initWallets();
   }, [currentUser?.id]);
 
+  // Auto-select wallet group when walletGroups changes
+  useEffect(() => {
+    if (walletGroups.length > 0 && !activeWalletGroup) {
+      // Try to restore from localStorage
+      const savedGroupId = localStorage.getItem("activeWalletGroup");
+      if (savedGroupId) {
+        const savedGroup = walletGroups.find(g => g.id === savedGroupId);
+        if (savedGroup) {
+          setActiveWalletGroup(savedGroup);
+          return;
+        }
+      }
+
+      // Otherwise select the primary group or first group
+      const primaryGroup = walletGroups.find(g => g.is_primary);
+      setActiveWalletGroup(primaryGroup || walletGroups[0]);
+    } else if (walletGroups.length === 0 && activeWalletGroup) {
+      setActiveWalletGroup(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletGroups]);
+
   useEffect(() => {
     api.health().then((res) => console.log("Backend health:", res));
   }, []);
@@ -584,15 +821,22 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setManualAddress,
     wallets,
     setWallets,
+    // Grouped wallets
+    walletGroups,
+    activeWalletGroup,
+    setActiveWalletGroup,
+    // Legacy single wallet
     activeWallet,
     setActiveWallet,
+    // Wallet management
     addWallet,
     removeWallet,
+    removeWalletGroup,
     updateWalletName,
     setPrimaryWallet,
     connectWallet,
     disconnectConnectedWallet,
-    availableWallets: aptosWallets || [], // Could combine with Solana wallets
+    availableWallets: aptosWallets || [],
     isWalletConnecting,
     walletError,
     clearWalletError,

@@ -58,12 +58,14 @@ class ChatRequest(BaseModel):
 # Wallet Result Models
 # ============================================================
 
+# Update the WalletPortfolioResult class to include chain field
 class WalletPortfolioResult(BaseModel):
     """
     Result for a single wallet's portfolio fetch.
     Includes success status and error details if failed.
     """
     address: str = Field(description="Wallet address")
+    chain: str = Field(description="Blockchain network (e.g., ethereum_sepolia, aptos)")  # ← ADD THIS
     label: str = Field(description="User-friendly wallet name")
     success: bool = Field(description="Whether portfolio was fetched successfully")
     error: Optional[str] = Field(None, description="Error message if fetch failed")
@@ -73,7 +75,8 @@ class WalletPortfolioResult(BaseModel):
         json_schema_extra = {
             "examples": [
                 {
-                    "address": "0x06c52...",
+                    "address": "0x742d35Cc6634C0532925a3b844Bc9e7595f5bE21",
+                    "chain": "ethereum_sepolia",  # ← ADD THIS
                     "label": "Main Wallet",
                     "success": True,
                     "error": None,
@@ -83,15 +86,15 @@ class WalletPortfolioResult(BaseModel):
                     }
                 },
                 {
-                    "address": "0x123...",
-                    "label": "Trading Wallet",
+                    "address": "BC1QXY2KGDYGJRSQTZQ2N0YXML2W9RSYQ04ZMXKF23",
+                    "chain": "solana",  # ← ADD THIS
+                    "label": "Trading Wallet", 
                     "success": False,
                     "error": "Failed to fetch account resources: HTTP 404",
                     "data": None
                 }
             ]
         }
-
 
 # ============================================================
 # Aggregated Portfolio Models

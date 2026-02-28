@@ -19,9 +19,10 @@ interface TokenBalance {
 
 interface Props {
   balances: TokenBalance[];
+  showWalletColumn?: boolean; // Show wallet column (useful for "All Wallets" view)
 }
 
-const BalancesTable: React.FC<Props> = ({ balances }) => {
+const BalancesTable: React.FC<Props> = ({ balances, showWalletColumn = true }) => {
   const { theme } = useAppContext();
   const [copiedAddress, setCopiedAddress] = React.useState<string | null>(null);
 
@@ -79,11 +80,13 @@ const BalancesTable: React.FC<Props> = ({ balances }) => {
               }`}>
                 Amount
               </th>
-              <th className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${
-                theme === "dark" ? "text-zinc-500" : "text-gray-600"
-              }`}>
-                Wallet
-              </th>
+              {showWalletColumn && (
+                <th className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider ${
+                  theme === "dark" ? "text-zinc-500" : "text-gray-600"
+                }`}>
+                  Wallet
+                </th>
+              )}
               <th className={`px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider ${
                 theme === "dark" ? "text-zinc-500" : "text-gray-600"
               }`}>
@@ -107,7 +110,7 @@ const BalancesTable: React.FC<Props> = ({ balances }) => {
                 key={i}
                 className={`border-b transition-colors ${
                   theme === "dark"
-                    ? "border-zinc-800 hover:bg-zinc-900/50"
+                    ? "border-zinc-800/60 hover:bg-zinc-800/50"
                     : "border-gray-100 hover:bg-gray-50"
                 }`}
               >
@@ -144,35 +147,37 @@ const BalancesTable: React.FC<Props> = ({ balances }) => {
                 </td>
                 
                 {/* Wallet */}
-                <td className="px-4 py-4">
-                  <div className="flex flex-col gap-1">
-                    {bal.wallet_name && (
-                      <span className={`text-sm font-medium ${
-                        theme === "dark" ? "text-blue-400" : "text-blue-600"
-                      }`}>
-                        {bal.wallet_name}
-                      </span>
-                    )}
-                    {bal.wallet_address && (
-                      <button
-                        onClick={() => copyToClipboard(bal.wallet_address!)}
-                        className={`font-mono text-xs transition-colors w-fit flex items-center gap-1 ${
-                          theme === "dark"
-                            ? "text-zinc-500 hover:text-blue-400"
-                            : "text-gray-500 hover:text-blue-600"
-                        }`}
-                        title="Copy wallet address"
-                      >
-                        {shortenAddress(bal.wallet_address)}
-                        {copiedAddress === bal.wallet_address ? (
-                          <Check className="w-3 h-3 text-green-500" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                      </button>
-                    )}
-                  </div>
-                </td>
+                {showWalletColumn && (
+                  <td className="px-4 py-4">
+                    <div className="flex flex-col gap-1">
+                      {bal.wallet_name && (
+                        <span className={`text-sm font-medium ${
+                          theme === "dark" ? "text-blue-400" : "text-blue-600"
+                        }`}>
+                          {bal.wallet_name}
+                        </span>
+                      )}
+                      {bal.wallet_address && (
+                        <button
+                          onClick={() => copyToClipboard(bal.wallet_address!)}
+                          className={`font-mono text-xs transition-colors w-fit flex items-center gap-1 ${
+                            theme === "dark"
+                              ? "text-zinc-500 hover:text-blue-400"
+                              : "text-gray-500 hover:text-blue-600"
+                          }`}
+                          title="Copy wallet address"
+                        >
+                          {shortenAddress(bal.wallet_address)}
+                          {copiedAddress === bal.wallet_address ? (
+                            <Check className="w-3 h-3 text-green-500" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                )}
                 
                 {/* Price */}
                 <td className={`px-4 py-4 text-right ${
@@ -218,10 +223,10 @@ const BalancesTable: React.FC<Props> = ({ balances }) => {
         {balances.map((bal, i) => (
           <div
             key={i}
-            className={`p-4 rounded-lg border ${
+            className={`p-4 rounded-xl border transition-colors ${
               theme === "dark"
-                ? "bg-zinc-900 border-zinc-800"
-                : "bg-white border-gray-200"
+                ? "bg-zinc-900 border-zinc-700/60 hover:border-zinc-600"
+                : "bg-white border-gray-200 hover:border-gray-300"
             }`}
           >
             {/* Token Header */}
@@ -280,7 +285,7 @@ const BalancesTable: React.FC<Props> = ({ balances }) => {
                 </span>
               </div>
 
-              {bal.wallet_name && (
+              {showWalletColumn && bal.wallet_name && (
                 <div className="flex justify-between">
                   <span className={`text-sm ${
                     theme === "dark" ? "text-zinc-500" : "text-gray-600"

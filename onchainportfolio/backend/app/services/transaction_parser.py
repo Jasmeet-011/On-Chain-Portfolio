@@ -1,6 +1,9 @@
 # app/services/transaction_parser.py
+import logging
 from typing import Dict, Any, Optional, List
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+
+logger = logging.getLogger("chainlens.services.transaction_parser")
 
 class TransactionParser:
     """
@@ -110,7 +113,8 @@ class TransactionParser:
         decimals = 8 if symbol == "APT" else 6  # Default decimals
         try:
             amount = Decimal(amount_raw) / (Decimal(10) ** decimals)
-        except:
+        except (InvalidOperation, ValueError, TypeError) as e:
+            logger.debug("Failed to parse transfer amount: %s", e)
             amount = Decimal(0)
         
         return {
@@ -177,7 +181,8 @@ class TransactionParser:
         
         try:
             amount = Decimal(amount_raw) / (Decimal(10) ** 8)  # APT decimals
-        except:
+        except (InvalidOperation, ValueError, TypeError) as e:
+            logger.debug("Failed to parse stake amount: %s", e)
             amount = Decimal(0)
         
         return {

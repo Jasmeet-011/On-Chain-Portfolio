@@ -1,81 +1,140 @@
-# backend/app/services/history_service.py - FIXED: Better Error Handling
+# backend/app/services/history_service.py
 import httpx
 import time
 from typing import Optional, Dict, List, Tuple
-from datetime import datetime, timedelta
 
 
 class HistoryService:
     """
     Service for fetching historical cryptocurrency prices.
-    
-    ✅ FIXED:
-    - Better error handling for missing token histories
-    - Filters out $0 values
-    - Continues even if some tokens fail
-    - More detailed logging
+
+    Data sources (priority order):
+    1. Binance Klines API (free, no key, covers 200+ tokens, fast)
+    2. CoinGecko market_chart (fallback for tokens not on Binance)
+
+    Stablecoins return a flat $1.00 line (no API needed).
     """
-    
+
     def __init__(self, cache_ttl_seconds: int = 3600):
-        """
-        Initialize history service.
-        
-        Args:
-            cache_ttl_seconds: Cache TTL (default 1 hour = 3600 seconds)
-        """
         self.cache_ttl = cache_ttl_seconds
         self._cache: Dict[str, Tuple[List[Dict], float]] = {}
-        
-        # CoinGecko API
+
+        # Binance Klines API (primary — free, fast, no rate limit issues)
+        self.binance_base = "https://api.binance.com/api/v3"
+
+        # CoinGecko API (fallback)
         self.coingecko_base = "https://api.coingecko.com/api/v3"
-        
-        # Map symbols to CoinGecko IDs
+
+        # Stablecoins: always $1.00, no API call needed
+        self.stablecoins = {
+            "USDC", "USDT", "DAI", "BUSD", "TUSD", "FRAX",
+            "LUSD", "SUSD", "USDD", "GUSD", "USDBC", "USDC.E",
+        }
+
+        # Binance trading pairs for historical klines
+        self.binance_symbols = {
+            "BTC": "BTCUSDT", "ETH": "ETHUSDT", "BNB": "BNBUSDT",
+            "SOL": "SOLUSDT", "APT": "APTUSDT", "ADA": "ADAUSDT",
+            "XRP": "XRPUSDT", "DOGE": "DOGEUSDT", "LTC": "LTCUSDT",
+            "DOT": "DOTUSDT", "AVAX": "AVAXUSDT", "MATIC": "MATICUSDT",
+            "ATOM": "ATOMUSDT", "FIL": "FILUSDT", "GRT": "GRTUSDT",
+            "WETH": "ETHUSDT", "WBTC": "BTCUSDT", "WMATIC": "MATICUSDT",
+            "UNI": "UNIUSDT", "AAVE": "AAVEUSDT", "LINK": "LINKUSDT",
+            "MKR": "MKRUSDT", "CRV": "CRVUSDT", "COMP": "COMPUSDT",
+            "LDO": "LDOUSDT", "SNX": "SNXUSDT", "SUSHI": "SUSHIUSDT",
+            "ARB": "ARBUSDT", "OP": "OPUSDT",
+            "SHIB": "SHIBUSDT", "PEPE": "PEPEUSDT",
+            "BONK": "BONKUSDT", "JUP": "JUPUSDT", "RAY": "RAYUSDT",
+            "ORCA": "ORCAUSDT",
+        }
+
+        # CoinGecko ID map (fallback only)
         self.coingecko_ids = {
-            # Major coins
-            "APT": "aptos",
-            "SOL": "solana",
-            "BTC": "bitcoin",
-            "ETH": "ethereum",
-            "BNB": "binancecoin",
-            "ADA": "cardano",
-            "DOT": "polkadot",
-            "MATIC": "matic-network",
-            "AVAX": "avalanche-2",
-            "ATOM": "cosmos",
-            "LINK": "chainlink",
-            "UNI": "uniswap",
-            "XRP": "ripple",
-            "DOGE": "dogecoin",
-            "LTC": "litecoin",
-            
-            # Stablecoins
-            "USDC": "usd-coin",
-            "USDT": "tether",
-            "DAI": "dai",
-            "BUSD": "binance-usd",
-            "TUSD": "true-usd",
-            "USDD": "usdd",
+            "APT": "aptos", "SOL": "solana", "BTC": "bitcoin",
+            "ETH": "ethereum", "BNB": "binancecoin", "ADA": "cardano",
+            "DOT": "polkadot", "MATIC": "matic-network", "AVAX": "avalanche-2",
+            "ATOM": "cosmos", "LINK": "chainlink", "UNI": "uniswap",
+            "XRP": "ripple", "DOGE": "dogecoin", "LTC": "litecoin",
+            "USDC": "usd-coin", "USDT": "tether", "DAI": "dai",
+            "BUSD": "binance-usd", "BONK": "bonk", "JUP": "jupiter-exchange-solana",
         }
     
+    def _get_binance_interval(self, days: int) -> Tuple[str, int]:
+        """Return (interval, limit) for Binance klines based on requested days."""
+        if days <= 1:
+            return "1h", 24
+        elif days <= 7:
+            return "4h", 42       # 42 × 4h = 168h = 7 days
+        elif days <= 30:
+            return "1d", 30
+        elif days <= 90:
+            return "1d", 90
+        else:
+            return "1d", min(days, 365)
+
+    def _get_price_history_from_binance(self, symbol: str, days: int) -> Optional[List]:
+        """
+        Fetch historical prices from Binance Klines API.
+        Returns list of [timestamp_seconds, price] pairs, or None on failure.
+        """
+        pair = self.binance_symbols.get(symbol)
+        if not pair:
+            return None
+
+        interval, limit = self._get_binance_interval(days)
+
+        try:
+            url = f"{self.binance_base}/klines"
+            params = {"symbol": pair, "interval": interval, "limit": limit}
+
+            with httpx.Client(timeout=12.0) as client:
+                response = client.get(url, params=params)
+                if response.status_code != 200:
+                    return None
+                klines = response.json()
+
+            if not klines:
+                return None
+
+            # kline format: [openTime, open, high, low, CLOSE, volume, closeTime, ...]
+            # closeTime (index 6) in ms, close price (index 4)
+            prices = []
+            for k in klines:
+                ts = int(k[6]) // 1000   # closeTime ms → seconds
+                price = float(k[4])       # close price
+                prices.append([ts * 1000, price])  # keep ms format for _format_response
+
+            print(f"[HISTORY] ✓ Binance {symbol} ({days}d): {len(prices)} points via {pair}")
+            return prices
+
+        except Exception as e:
+            print(f"[HISTORY] Binance error for {symbol}: {e}")
+            return None
+
+    def _get_stablecoin_history(self, symbol: str, days: int) -> List:
+        """Generate a flat $1.00 price history for stablecoins."""
+        interval, limit = self._get_binance_interval(days)
+        now_ms = int(time.time() * 1000)
+        # interval in milliseconds
+        interval_ms = {"1h": 3600_000, "4h": 14400_000, "1d": 86400_000}.get(interval, 3600_000)
+        prices = []
+        for i in range(limit, 0, -1):
+            ts = now_ms - i * interval_ms
+            prices.append([ts, 1.0])
+        return prices
+
     def get_price_history(
-        self, 
-        symbol: str, 
+        self,
+        symbol: str,
         days: int = 7,
         chain: Optional[str] = None
     ) -> Optional[Dict]:
         """
         Get historical prices for a token.
-        
-        Args:
-            symbol: Token symbol (e.g., "SOL", "APT")
-            days: Number of days to fetch (1, 7, 30, 90, 365)
-            chain: Optional chain hint
-        
-        Returns:
-            Price history data or None if unavailable
+        Priority: Cache → Stablecoin flat line → Binance Klines → CoinGecko
         """
         symbol = symbol.upper()
-        
+
         # Check cache
         cache_key = f"{symbol}:{days}:{chain or 'any'}"
         if cache_key in self._cache:
@@ -83,57 +142,52 @@ class HistoryService:
             if time.time() - timestamp < self.cache_ttl:
                 print(f"[HISTORY] ✓ Cache hit for {symbol} ({days}d)")
                 return self._format_response(symbol, data)
-        
-        # Fetch from CoinGecko
+
+        # Stablecoins: return flat $1.00 line (no API needed)
+        if symbol in self.stablecoins:
+            prices = self._get_stablecoin_history(symbol, days)
+            self._cache[cache_key] = (prices, time.time())
+            return self._format_response(symbol, prices)
+
+        # Try Binance Klines first (free, fast, no rate limits)
+        binance_prices = self._get_price_history_from_binance(symbol, days)
+        if binance_prices:
+            self._cache[cache_key] = (binance_prices, time.time())
+            return self._format_response(symbol, binance_prices)
+
+        # Fallback: CoinGecko market_chart
         coin_id = self.coingecko_ids.get(symbol)
         if not coin_id:
-            print(f"[WARNING] No CoinGecko ID for {symbol} - token not supported")
+            print(f"[HISTORY] No price source for {symbol}")
             return None
-        
+
         try:
-            print(f"[HISTORY] Fetching {symbol} history ({days}d) from CoinGecko...")
-            
+            print(f"[HISTORY] Falling back to CoinGecko for {symbol} ({days}d)...")
             url = f"{self.coingecko_base}/coins/{coin_id}/market_chart"
-            params = {
-                "vs_currency": "usd",
-                "days": days
-            }
-            
+            params = {"vs_currency": "usd", "days": days}
+
             with httpx.Client(timeout=15.0) as client:
                 response = client.get(url, params=params)
-                
+
                 if response.status_code == 429:
-                    print(f"[ERROR] Rate limited by CoinGecko! Try again later.")
+                    print(f"[HISTORY] CoinGecko rate limited for {symbol}")
                     return None
-                
-                if response.status_code == 401:
-                    print(f"[ERROR] CoinGecko API authentication error")
-                    return None
-                
                 if response.status_code != 200:
-                    print(f"[ERROR] CoinGecko returned status {response.status_code}")
+                    print(f"[HISTORY] CoinGecko error {response.status_code} for {symbol}")
                     return None
-                
+
                 data = response.json()
-            
+
             prices = data.get("prices", [])
-            
             if not prices:
-                print(f"[WARNING] No price data returned for {symbol}")
                 return None
-            
-            print(f"[SUCCESS] ✓ Got {len(prices)} data points for {symbol}")
-            
-            # Cache the raw data
+
+            print(f"[HISTORY] ✓ CoinGecko {symbol}: {len(prices)} points")
             self._cache[cache_key] = (prices, time.time())
-            
             return self._format_response(symbol, prices)
-            
-        except httpx.TimeoutException:
-            print(f"[ERROR] Timeout fetching history for {symbol}")
-            return None
+
         except Exception as e:
-            print(f"[ERROR] Failed to fetch history for {symbol}: {e}")
+            print(f"[HISTORY] CoinGecko error for {symbol}: {e}")
             return None
     
     def _format_response(self, symbol: str, prices: List) -> Dict:

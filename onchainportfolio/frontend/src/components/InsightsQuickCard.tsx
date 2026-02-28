@@ -1,7 +1,8 @@
-// src/components/InsightsQuickCard.tsx
+// src/components/InsightsQuickCard.tsx - Uses centralized API client
 import React, { useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import { TrendingUp, AlertCircle, CheckCircle, ArrowRight } from "lucide-react";
+import { api } from "../api";
 
 interface Props {
   onViewDetails?: () => void;
@@ -12,18 +13,6 @@ const InsightsQuickCard: React.FC<Props> = ({ onViewDetails }) => {
   const [insights, setInsights] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Helper to get auth token
-  const getAuthToken = (): string => {
-    const userStr = localStorage.getItem("user");
-    if (!userStr) return "";
-    try {
-      const user = JSON.parse(userStr);
-      return user.access_token || "";
-    } catch {
-      return "";
-    }
-  };
-
   useEffect(() => {
     fetchInsights();
   }, []);
@@ -31,15 +20,8 @@ const InsightsQuickCard: React.FC<Props> = ({ onViewDetails }) => {
   const fetchInsights = async () => {
     setLoading(true);
     try {
-      const token = getAuthToken();
-      const response = await fetch("http://localhost:8000/v1/insights/summary", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setInsights(data);
-      }
+      const data = await api.getInsightsSummary();
+      setInsights(data);
     } catch (err) {
       console.error("Failed to fetch insights:", err);
     } finally {
@@ -86,6 +68,40 @@ const InsightsQuickCard: React.FC<Props> = ({ onViewDetails }) => {
   }
 
   if (!insights) return null;
+
+  // Check if insights are empty (no real data)
+  if (insights.total_tokens === 0 || insights.total_value_usd === 0) {
+    return (
+      <div
+        className={`rounded-xl p-6 ${
+          theme === "dark"
+            ? "bg-zinc-900 border border-zinc-800"
+            : "bg-white border border-gray-200 shadow-sm"
+        }`}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div
+            className={`w-10 h-10 rounded-full flex items-center justify-center ${
+              theme === "dark" ? "bg-zinc-800" : "bg-gray-100"
+            }`}
+          >
+            <TrendingUp className={`w-5 h-5 ${theme === "dark" ? "text-zinc-500" : "text-gray-400"}`} />
+          </div>
+          <div>
+            <h3 className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+              Portfolio Health
+            </h3>
+            <p className={`text-sm ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
+              No data available yet
+            </p>
+          </div>
+        </div>
+        <p className={`text-sm ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+          Add wallets with token balances to see insights
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div

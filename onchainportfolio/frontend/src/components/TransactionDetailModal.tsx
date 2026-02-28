@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../api";
+import type { ChainType } from "../api";
 import { shortenAddress } from "../utils";
 import { CheckCircle2, XCircle, Copy, ExternalLink, AlertTriangle, RefreshCw, X } from "lucide-react";
 
@@ -10,20 +11,19 @@ interface Props {
   onClose: () => void;
   txHash: string;
   address: string;
-  chain: 'aptos' | 'solana';
+  chain: ChainType;
 }
 
-const CHAIN_CONFIG = {
-  aptos: { 
-    name: "APTOS", 
-    emoji: "⬢", 
-    explorer: "https://explorer.aptoslabs.com/txn"
-  },
-  solana: { 
-    name: "SOLANA", 
-    emoji: "◎", 
-    explorer: "https://explorer.solana.com/tx"
-  },
+const CHAIN_CONFIG: Record<ChainType, { name: string; emoji: string; explorer: string }> = {
+  aptos:            { name: "APTOS",    emoji: "⬢",  explorer: "https://explorer.aptoslabs.com/txn" },
+  solana:           { name: "SOLANA",   emoji: "◎",  explorer: "https://explorer.solana.com/tx" },
+  ethereum:         { name: "ETHEREUM", emoji: "Ξ",  explorer: "https://etherscan.io/tx" },
+  ethereum_sepolia: { name: "SEPOLIA",  emoji: "Ξ",  explorer: "https://sepolia.etherscan.io/tx" },
+  polygon:          { name: "POLYGON",  emoji: "⬡",  explorer: "https://polygonscan.com/tx" },
+  polygon_amoy:     { name: "AMOY",     emoji: "⬡",  explorer: "https://amoy.polygonscan.com/tx" },
+  base:             { name: "BASE",     emoji: "🔵", explorer: "https://basescan.org/tx" },
+  base_sepolia:     { name: "BASE SEP", emoji: "🔵", explorer: "https://sepolia.basescan.org/tx" },
+  evm:              { name: "EVM",      emoji: "⬡",  explorer: "https://etherscan.io/tx" },
 };
 
 const TransactionDetailModal: React.FC<Props> = ({ isOpen, onClose, txHash, address, chain }) => {

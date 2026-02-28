@@ -266,7 +266,7 @@ def main():
     """Run all tests."""
     
     print("\n" + "=" * 60)
-    print("🚀 CHAINIQ MULTI-CHAIN ADAPTER TESTS")
+    print("🚀 CHAINLENS MULTI-CHAIN ADAPTER TESTS")
     print("=" * 60)
     
     results = {

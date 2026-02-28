@@ -2,18 +2,16 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../api";
-import { 
-  MessageCircle, 
-  Send, 
-  Loader2, 
-  Sparkles, 
-  Wallet as WalletIcon,
+import {
+  MessageCircle,
+  Loader2,
+  Sparkles,
   TrendingUp,
   Image as ImageIcon,
   BarChart3,
   CheckCircle2,
   XCircle,
-  Settings
+  Settings,
 } from "lucide-react";
 
 const ChatPage: React.FC = () => {
@@ -95,7 +93,7 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -173,7 +171,9 @@ const ChatPage: React.FC = () => {
           }`}>
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                theme === "dark" ? "bg-white text-black" : "bg-black text-white"
+                theme === "dark"
+                  ? "bg-linear-to-br from-blue-500 to-purple-600 text-white"
+                  : "bg-black text-white"
               }`}>
                 <Sparkles className="w-6 h-6" />
               </div>
@@ -223,14 +223,16 @@ const ChatPage: React.FC = () => {
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center">
                 <div className={`w-16 h-16 rounded-xl flex items-center justify-center mb-4 ${
-                  theme === "dark" ? "bg-white text-black" : "bg-black text-white"
+                  theme === "dark"
+                    ? "bg-linear-to-br from-blue-500 to-purple-600 text-white"
+                    : "bg-black text-white"
                 }`}>
                   <Sparkles className="w-8 h-8" />
                 </div>
                 <h3 className={`text-xl font-bold mb-2 ${
                   theme === "dark" ? "text-white" : "text-gray-900"
                 }`}>
-                  Welcome to ChainIQ
+                  Welcome to ChainLens
                 </h3>
                 <p className={`max-w-md mb-4 ${
                   theme === "dark" ? "text-zinc-400" : "text-gray-600"
@@ -284,10 +286,10 @@ const ChatPage: React.FC = () => {
                       <div className={`max-w-[80%] rounded-xl px-4 py-3 ${
                         msg.role === "user"
                           ? theme === "dark"
-                            ? "bg-white text-black"
+                            ? "bg-blue-600 text-white"
                             : "bg-black text-white"
                           : theme === "dark"
-                          ? "bg-zinc-800 text-zinc-200"
+                          ? "bg-zinc-800 border border-zinc-700/60 text-zinc-200"
                           : "bg-gray-100 text-gray-900"
                       }`}>
                         <p className="whitespace-pre-wrap">{msg.text}</p>
@@ -392,7 +394,7 @@ const ChatPage: React.FC = () => {
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onKeyDown={handleKeyDown}
                 placeholder="Ask me anything..."
                 disabled={isLoading}
                 className={`flex-1 px-4 py-3 rounded-lg border focus:outline-none focus:ring-2 ${
@@ -406,7 +408,7 @@ const ChatPage: React.FC = () => {
                 disabled={!inputMessage.trim() || isLoading}
                 className={`p-3 rounded-lg font-medium transition-colors flex items-center justify-center ${
                   theme === "dark"
-                    ? "bg-white text-black hover:bg-gray-200"
+                    ? "bg-blue-600 text-white hover:bg-blue-500"
                     : "bg-black text-white hover:bg-gray-800"
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >

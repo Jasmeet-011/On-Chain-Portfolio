@@ -1,4 +1,4 @@
-// src/pages/AnalyticsPage.tsx - UPDATED: Added Insights Section
+// src/pages/AnalyticsPage.tsx - Wallet Group Support with Combined Portfolio
 import React, { useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../api";
@@ -13,28 +13,35 @@ interface UniqueToken {
   chain: string;
 }
 
-type AnalyticsScope = 'complete' | string; // 'complete' or wallet address
+type AnalyticsScope = 'complete' | string; // 'complete' or wallet group id (e.g. "phantom", "metamask")
 
 const AnalyticsPage: React.FC = () => {
-  const { theme, activeWallet, wallets, portfolioData, setPortfolioData } = useAppContext();
-  
+  const { theme, wallets, walletGroups, portfolioData, setPortfolioData } = useAppContext();
+
   const [selectedScope, setSelectedScope] = useState<AnalyticsScope>('complete');
   const [scopeLabel, setScopeLabel] = useState<string>('Complete Portfolio');
-  
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const getChainEmoji = (chain: string) => {
+    const emojis: Record<string, string> = {
+      aptos: '⬢', solana: '◎', ethereum: 'Ξ', ethereum_sepolia: 'Ξ',
+      polygon: '⬡', polygon_amoy: '⬡', base: '🔵', base_sepolia: '🔵', evm: '🔗',
+    };
+    return emojis[chain] || '⬢';
+  };
+
   const getScopeOptions = () => {
-    const options: Array<{ value: AnalyticsScope; label: string; chain?: string }> = [
+    const options: Array<{ value: AnalyticsScope; label: string }> = [
       { value: 'complete', label: 'Complete Portfolio (All Wallets)' },
     ];
 
-    wallets.forEach((wallet) => {
-      const chainEmoji = wallet.chain === 'aptos' ? '⬢' : '◎';
+    walletGroups.forEach((group) => {
+      const chainLabels = group.chains.map(c => getChainEmoji(c)).join(' ');
       options.push({
-        value: wallet.address,
-        label: `${chainEmoji} ${wallet.label}`,
-        chain: wallet.chain,
+        value: group.id,
+        label: `${group.icon} ${group.label} ${chainLabels}`,
       });
     });
 
@@ -49,71 +56,48 @@ const AnalyticsPage: React.FC = () => {
 
     setLoading(true);
     setError(null);
-    
-    try {
-      if (scope === 'complete') {
-        console.log('[Analytics] Loading complete portfolio for all wallets');
-        
-        const allBalances: any[] = [];
-        let totalValue = 0;
 
-        for (const wallet of wallets) {
-          try {
-            const portfolio = await api.getPortfolio(wallet.address, wallet.chain);
-            
-            const balancesWithWallet = portfolio.balances.map((bal: any) => ({
-              ...bal,
-              wallet_name: wallet.label,
-              wallet_address: wallet.address,
-              chain: wallet.chain,
-            }));
-            
-            allBalances.push(...balancesWithWallet);
-            totalValue += portfolio.total_usd_value || 0;
-          } catch (err) {
-            console.error(`Failed to load wallet ${wallet.label}:`, err);
-          }
-        }
-        
-        setPortfolioData({
-          balances: allBalances,
-          total_usd_value: totalValue,
-          address: 'aggregate',
-          wallet_name: 'Complete Portfolio',
-          chain: 'multi-chain',
-        });
-        
-        setScopeLabel('Complete Portfolio');
-        
+    try {
+      // Build wallet pairs based on scope
+      let walletPairs: Array<{ address: string; chain: string }>;
+      let label: string;
+
+      if (scope === 'complete') {
+        // All wallets combined
+        walletPairs = wallets.map(w => ({ address: w.address, chain: w.chain }));
+        label = 'Complete Portfolio';
       } else {
-        const wallet = wallets.find(w => w.address === scope);
-        if (!wallet) {
-          setError('Selected wallet not found');
+        // Specific wallet group
+        const group = walletGroups.find(g => g.id === scope);
+        if (!group) {
+          setError('Selected wallet group not found');
+          setLoading(false);
           return;
         }
-
-        console.log(`[Analytics] Loading portfolio for ${wallet.chain} wallet:`, wallet.address);
-        
-        const portfolio = await api.getPortfolio(wallet.address, wallet.chain);
-        
-        const balancesWithWallet = portfolio.balances.map((bal: any) => ({
-          ...bal,
-          wallet_name: wallet.label,
-          wallet_address: wallet.address,
-          chain: wallet.chain,
-        }));
-        
-        setPortfolioData({
-          balances: balancesWithWallet,
-          total_usd_value: portfolio.total_usd_value || 0,
-          address: portfolio.address || wallet.address,
-          wallet_name: wallet.label,
-          chain: wallet.chain,
-        });
-        
-        setScopeLabel(wallet.label);
+        walletPairs = group.wallets.map(w => ({ address: w.address, chain: w.chain }));
+        label = group.label;
       }
-      
+
+      console.log(`[Analytics] Loading portfolio for scope "${scope}":`, walletPairs);
+
+      const groupData = await api.getGroupPortfolio(walletPairs, true);
+
+      const balancesWithWallet = groupData.all_balances.map((bal: any) => ({
+        ...bal,
+        wallet_name: label,
+      }));
+
+      setPortfolioData({
+        balances: balancesWithWallet,
+        total_usd_value: groupData.total_usd_value || 0,
+        address: scope === 'complete' ? 'aggregate' : walletPairs[0]?.address || '',
+        wallet_name: label,
+        chain: scope === 'complete' ? 'multi-chain' : walletPairs[0]?.chain || 'unknown',
+        chains_queried: groupData.chains_queried,
+      });
+
+      setScopeLabel(label);
+
     } catch (error) {
       console.error("[Analytics] Failed to load portfolio:", error);
       setError("Failed to load portfolio data");
@@ -122,15 +106,18 @@ const AnalyticsPage: React.FC = () => {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (wallets.length > 0) {
       loadPortfolio(selectedScope);
     }
-  }, [selectedScope, wallets.length]);
+  }, [selectedScope]);
 
+  // Reload when wallets change (new wallet added/removed)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (wallets.length > 0 && selectedScope === 'complete') {
-      loadPortfolio('complete');
+    if (wallets.length > 0) {
+      loadPortfolio(selectedScope);
     }
   }, [wallets.length]);
 
@@ -275,9 +262,9 @@ const AnalyticsPage: React.FC = () => {
           </h2>
           <p className={`text-sm mt-1 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
             Viewing: <span className={`font-medium ${theme === "dark" ? "text-white" : "text-gray-900"}`}>{scopeLabel}</span>
-            {selectedScope === 'complete' && wallets.length > 1 && (
+            {selectedScope === 'complete' && walletGroups.length > 1 && (
               <span className="ml-2">
-                ({wallets.length} wallets aggregated)
+                ({walletGroups.length} wallet providers, {wallets.length} addresses aggregated)
               </span>
             )}
           </p>
@@ -360,8 +347,8 @@ const AnalyticsPage: React.FC = () => {
         <PortfolioHistoryChart selectedScope={selectedScope} />
       </div>
 
-      {/* ✨ NEW: Portfolio Intelligence Section */}
-      <InsightsSection />
+      {/* Portfolio Intelligence Section */}
+      <InsightsSection selectedScope={selectedScope} />
 
       {/* Token Performance Section */}
       {uniqueTokens.length > 0 && (

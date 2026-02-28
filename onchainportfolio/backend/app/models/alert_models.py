@@ -3,7 +3,7 @@
 Alert Data Models - Complete 3-Tier System + Token Alerts
 This file supports both simple token alerts AND the full 3-tier system
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, Literal, List
 from datetime import datetime
 
@@ -96,34 +96,37 @@ class WalletAlertCreate(BaseModel):
 class AlertCreate(BaseModel):
     """Create any type of alert (unified)"""
     alert_type: AlertType
-    
+
     # TIER 1: Portfolio fields
     portfolio_metric: Optional[PortfolioMetric] = None
-    
+
     # TIER 2: Token fields
     token_symbol: Optional[str] = None
     target_price: Optional[float] = None
-    
+
     # TIER 3: Wallet fields
     wallet_address: Optional[str] = None
     target_value: Optional[float] = None
-    
+
     # Common fields
     condition: AlertCondition
-    
+
+    @model_validator(mode='after')
     def validate_fields(self):
         """Validate that required fields are present for alert type"""
         if self.alert_type == "portfolio":
             if not self.portfolio_metric or not self.target_value:
                 raise ValueError("Portfolio alerts require portfolio_metric and target_value")
-                
+
         elif self.alert_type == "token":
             if not self.token_symbol or not self.target_price:
                 raise ValueError("Token alerts require token_symbol and target_price")
-                
+
         elif self.alert_type == "wallet":
             if not self.wallet_address or not self.target_value:
                 raise ValueError("Wallet alerts require wallet_address and target_value")
+
+        return self
 
 
 # ============================================================
@@ -139,14 +142,18 @@ class CreateAlertRequest(BaseModel):
     target_price: float = Field(gt=0, description="Target price in USD")
     condition: Literal["above", "below"] = Field(description="Price condition")
     wallet_address: Optional[str] = Field(default=None, description="Optional specific wallet")
-    
+    chain: Optional[str] = Field(default="solana", description="Blockchain chain for the token")
+    is_recurring: bool = Field(default=False, description="Re-trigger alert each time condition is met (every 1h)")
+
     class Config:
         json_schema_extra = {
             "example": {
                 "token_symbol": "SOL",
                 "target_price": 150.0,
                 "condition": "above",
-                "wallet_address": None
+                "wallet_address": None,
+                "chain": "solana",
+                "is_recurring": False
             }
         }
     

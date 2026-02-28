@@ -22,6 +22,9 @@ from app.services.auth_service import (
     update_user_wallet,
     get_user_wallet,
     remove_user_wallet,
+    get_user_by_verification_token,
+    verify_user_email,
+    refresh_verification_token,
 )
 from app.services.wallet_service import (
     list_user_wallets,
@@ -79,7 +82,7 @@ def user_to_response(user: dict, user_id: str) -> UserResponse:
 def signup(payload: SignUpRequest):
     """
     Create a new user account.
-    Returns user info and JWT access token.
+    Sends a verification email; returns user info + JWT token.
     """
     existing = get_user_by_email(payload.email)
     if existing:
@@ -92,11 +95,91 @@ def signup(payload: SignUpRequest):
     user_id = str(user["_id"])
     access_token = create_access_token(user_id=user_id)
 
+    # Send verification email (non-blocking — failure doesn't break signup)
+    try:
+        from app.services.email_service import EmailService
+        from app.config import settings
+        email_svc = EmailService()
+        token = user.get("email_verification_token", "")
+        app_url = settings.app_url.rstrip("/")
+        verify_url = f"{app_url}/verify-email/{token}"
+        email_svc.send_verification_email(
+            to_email=payload.email,
+            user_name=payload.name,
+            verify_url=verify_url,
+        )
+    except Exception as e:
+        print(f"[AUTH] Warning: Could not send verification email: {e}")
+
     return AuthResponse(
         user=user_to_response(user, user_id),
         access_token=access_token,
         token_type="bearer"
     )
+
+
+@router.post("/verify-email/{token}")
+def verify_email(token: str):
+    """
+    Verify a user's email address using the token from the verification email.
+    """
+    user = get_user_by_verification_token(token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired verification token.",
+        )
+
+    if user.get("is_email_verified"):
+        return {"message": "Email is already verified."}
+
+    success = verify_user_email(str(user["_id"]))
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify email. Please try again.",
+        )
+
+    return {"message": "Email verified successfully! You can now receive alerts."}
+
+
+@router.post("/resend-verification")
+def resend_verification(current_user: dict = Depends(get_current_user)):
+    """
+    Resend the email verification link for the current user.
+    Only works if email is not yet verified.
+    """
+    if current_user.get("is_email_verified"):
+        return {"message": "Your email is already verified."}
+
+    user_id = str(current_user["_id"])
+    new_token = refresh_verification_token(user_id)
+
+    if not new_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not generate a new verification token.",
+        )
+
+    try:
+        from app.services.email_service import EmailService
+        from app.config import settings
+        email_svc = EmailService()
+        app_url = settings.app_url.rstrip("/")
+        verify_url = f"{app_url}/verify-email/{new_token}"
+        email_svc.send_verification_email(
+            to_email=current_user["email"],
+            user_name=current_user.get("name", "User"),
+            verify_url=verify_url,
+        )
+    except Exception as e:
+        print(f"[AUTH] Warning: Could not resend verification email: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to send verification email. Check your SMTP configuration.",
+        )
+
+    return {"message": "Verification email sent. Please check your inbox."}
 
 
 @router.post("/login", response_model=AuthResponse)

@@ -51,7 +51,7 @@ const AlertCard: React.FC<AlertCardProps> = ({
     if (!alert.is_active) {
       return {
         label: "Paused",
-        color: theme === "dark" ? "bg-slate-700 text-slate-400 border-slate-600" : "bg-slate-100 text-slate-600 border-slate-200",
+        color: theme === "dark" ? "bg-zinc-800 text-zinc-300 border-zinc-600/60" : "bg-gray-100 text-gray-600 border-gray-200",
         icon: "⏸️"
       };
     }
@@ -75,22 +75,22 @@ const AlertCard: React.FC<AlertCardProps> = ({
 
   // Get chain icon
   const getChainIcon = (chain: string) => {
-    switch (chain?.toLowerCase()) {
-      case "aptos":
-        return "⬢";
-      case "solana":
-        return "◎";
-      default:
-        return "🔗";
-    }
+    const icons: Record<string, string> = {
+      aptos: "⬢",
+      solana: "◎",
+      ethereum: "Ξ",
+      polygon: "⬡",
+      base: "🔵",
+    };
+    return icons[chain?.toLowerCase()] || "🔗";
   };
 
   return (
     <div
-      className={`rounded-xl p-6 border transition-all duration-200 ${
+      className={`rounded-2xl p-5 border transition-all duration-200 ${
         theme === "dark"
-          ? "bg-slate-800 border-slate-700 hover:border-slate-600"
-          : "bg-white border-slate-200 hover:border-slate-300 shadow-sm"
+          ? "bg-zinc-900 border-zinc-700/60 hover:border-zinc-600"
+          : "bg-white border-gray-200 hover:border-gray-300 shadow-sm"
       }`}
     >
       {/* Header */}
@@ -98,14 +98,14 @@ const AlertCard: React.FC<AlertCardProps> = ({
         <div className="flex items-center gap-3">
           {/* Token Icon Placeholder */}
           <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold ${
-            theme === "dark" ? "bg-slate-700" : "bg-slate-100"
+            theme === "dark" ? "bg-zinc-800" : "bg-gray-100"
           }`}>
             {alert.token_symbol?.substring(0, 2) || "??"}
           </div>
           
           <div>
             <h3 className={`text-lg font-bold flex items-center gap-2 ${
-              theme === "dark" ? "text-white" : "text-slate-900"
+              theme === "dark" ? "text-white" : "text-gray-900"
             }`}>
               {alert.token_symbol}
               <span className="text-sm opacity-60" title={alert.chain}>
@@ -113,7 +113,7 @@ const AlertCard: React.FC<AlertCardProps> = ({
               </span>
             </h3>
             <p className={`text-sm ${
-              theme === "dark" ? "text-slate-400" : "text-slate-600"
+              theme === "dark" ? "text-zinc-400" : "text-gray-600"
             }`}>
               {alert.condition === "above" ? "⬆️ Above" : "⬇️ Below"} ${alert.target_price?.toFixed(2) || "0.00"}
             </p>
@@ -129,19 +129,19 @@ const AlertCard: React.FC<AlertCardProps> = ({
       {/* Current Price (if available) */}
       {alert.current_price && (
         <div className={`mb-4 p-3 rounded-lg ${
-          theme === "dark" ? "bg-slate-700/50" : "bg-slate-50"
+          theme === "dark" ? "bg-zinc-800/50" : "bg-gray-50"
         }`}>
           <div className="flex items-center justify-between">
-            <span className={`text-xs ${theme === "dark" ? "text-slate-400" : "text-slate-600"}`}>
+            <span className={`text-xs ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
               Current Price
             </span>
-            <span className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-slate-900"}`}>
+            <span className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
               ${alert.current_price.toFixed(2)}
             </span>
           </div>
           {/* Progress indicator */}
           <div className="mt-2">
-            <div className={`h-1 rounded-full ${theme === "dark" ? "bg-slate-600" : "bg-slate-200"}`}>
+            <div className={`h-1 rounded-full ${theme === "dark" ? "bg-zinc-700" : "bg-gray-200"}`}>
               <div 
                 className={`h-1 rounded-full ${
                   alert.condition === "above" 
@@ -163,26 +163,26 @@ const AlertCard: React.FC<AlertCardProps> = ({
 
       {/* Details */}
       <div className={`space-y-2 py-3 border-t border-b ${
-        theme === "dark" ? "border-slate-700" : "border-slate-200"
+        theme === "dark" ? "border-zinc-800" : "border-gray-200"
       }`}>
         {/* Wallet */}
         {alert.wallet_address ? (
           <div className="flex items-center justify-between text-sm">
-            <span className={theme === "dark" ? "text-slate-400" : "text-slate-600"}>
+            <span className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
               Wallet:
             </span>
             <span className={`font-mono ${
-              theme === "dark" ? "text-slate-300" : "text-slate-700"
+              theme === "dark" ? "text-zinc-300" : "text-gray-700"
             }`}>
               {alert.wallet_address.substring(0, 6)}...{alert.wallet_address.substring(alert.wallet_address.length - 4)}
             </span>
           </div>
         ) : (
           <div className="flex items-center justify-between text-sm">
-            <span className={theme === "dark" ? "text-slate-400" : "text-slate-600"}>
+            <span className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
               Scope:
             </span>
-            <span className={theme === "dark" ? "text-slate-300" : "text-slate-700"}>
+            <span className={theme === "dark" ? "text-zinc-300" : "text-gray-700"}>
               All wallets
             </span>
           </div>
@@ -190,20 +190,20 @@ const AlertCard: React.FC<AlertCardProps> = ({
 
         {/* Recurring */}
         <div className="flex items-center justify-between text-sm">
-          <span className={theme === "dark" ? "text-slate-400" : "text-slate-600"}>
+          <span className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
             Type:
           </span>
-          <span className={theme === "dark" ? "text-slate-300" : "text-slate-700"}>
+          <span className={theme === "dark" ? "text-zinc-300" : "text-gray-700"}>
             {alert.is_recurring ? "🔄 Recurring" : "1️⃣ One-time"}
           </span>
         </div>
 
         {/* Created Date */}
         <div className="flex items-center justify-between text-sm">
-          <span className={theme === "dark" ? "text-slate-400" : "text-slate-600"}>
+          <span className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
             Created:
           </span>
-          <span className={theme === "dark" ? "text-slate-300" : "text-slate-700"}>
+          <span className={theme === "dark" ? "text-zinc-300" : "text-gray-700"}>
             {formatDate(alert.created_at)}
           </span>
         </div>
@@ -211,7 +211,7 @@ const AlertCard: React.FC<AlertCardProps> = ({
         {/* Triggered Date - ✅ FIXED: Uses last_triggered */}
         {alert.last_triggered && (
           <div className="flex items-center justify-between text-sm">
-            <span className={theme === "dark" ? "text-slate-400" : "text-slate-600"}>
+            <span className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
               Triggered:
             </span>
             <span className="text-green-500 font-medium">
@@ -223,7 +223,7 @@ const AlertCard: React.FC<AlertCardProps> = ({
         {/* Trigger Count */}
         {alert.trigger_count > 0 && (
           <div className="flex items-center justify-between text-sm">
-            <span className={theme === "dark" ? "text-slate-400" : "text-slate-600"}>
+            <span className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
               Times Triggered:
             </span>
             <span className={`font-medium ${theme === "dark" ? "text-green-400" : "text-green-600"}`}>
@@ -242,8 +242,8 @@ const AlertCard: React.FC<AlertCardProps> = ({
           className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
             alert.is_active && !alert.last_triggered
               ? theme === "dark"
-                ? "bg-slate-700 text-slate-300 hover:bg-slate-600"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               : "bg-blue-600 text-white hover:bg-blue-700"
           } disabled:opacity-50 disabled:cursor-not-allowed`}
           title={
@@ -263,8 +263,8 @@ const AlertCard: React.FC<AlertCardProps> = ({
             onClick={() => onTest(alert.id)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               theme === "dark"
-                ? "bg-slate-700 text-slate-300 hover:bg-slate-600"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
             }`}
             title="Send test email"
           >

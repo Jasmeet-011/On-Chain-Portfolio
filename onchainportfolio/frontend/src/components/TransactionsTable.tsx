@@ -164,7 +164,7 @@ const TransactionsTable: React.FC<Props> = ({ address, onLoadTransactions }) => 
           onClick={loadTransactions}
           className={`px-4 py-2 rounded-lg transition-colors ${
             theme === "dark"
-              ? "bg-white text-black hover:bg-gray-200"
+              ? "bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700"
               : "bg-black text-white hover:bg-gray-800"
           }`}
         >
@@ -237,7 +237,7 @@ const TransactionsTable: React.FC<Props> = ({ address, onLoadTransactions }) => 
                     onClick={() => handleTxClick(tx.hash)}
                     className={`border-b cursor-pointer transition-colors ${
                       theme === "dark"
-                        ? "border-zinc-800 hover:bg-zinc-900/50"
+                        ? "border-zinc-800/60 hover:bg-zinc-800/50"
                         : "border-gray-100 hover:bg-gray-50"
                     }`}
                   >
@@ -295,10 +295,10 @@ const TransactionsTable: React.FC<Props> = ({ address, onLoadTransactions }) => 
               <div
                 key={`${tx.hash}-${idx}`}
                 onClick={() => handleTxClick(tx.hash)}
-                className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                className={`p-4 rounded-xl border cursor-pointer transition-all duration-150 ${
                   theme === "dark"
-                    ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-800"
-                    : "bg-white border-gray-200 hover:bg-gray-50"
+                    ? "bg-zinc-900 border-zinc-700/60 hover:border-zinc-600 hover:bg-zinc-800/60"
+                    : "bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50"
                 }`}
               >
                 <div className="flex items-center justify-between mb-3">

@@ -1,11 +1,14 @@
 # app/services/adapters/aptos_adapter.py
 import httpx
 import re
+import logging
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal, getcontext
 from urllib.parse import quote
 
 from .base import ChainAdapter
+
+logger = logging.getLogger("chainlens.adapters.aptos")
 
 
 class AptosAdapter(ChainAdapter):
@@ -103,9 +106,9 @@ class AptosAdapter(ChainAdapter):
                 return True, None
             
             return False, "Address not found on Aptos blockchain"
-        except Exception as e:
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
             # If there's an error, log but don't fail validation
-            print(f"[WARN] Could not verify Aptos address on-chain: {e}")
+            logger.warning("Could not verify Aptos address on-chain: %s", e)
             return True, None
     
     # ============================================================
@@ -145,14 +148,40 @@ class AptosAdapter(ChainAdapter):
             else:
                 return int(balance_data)
         
-        except Exception as e:
-            print(f"[ERROR] Failed to get Aptos balance: {e}")
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
+            logger.error("Failed to get Aptos balance: %s", e)
             return None
     
+    def get_native_balance(self, address: str) -> Optional[Dict[str, Any]]:
+        """
+        Get native APT balance.
+
+        Args:
+            address: Aptos address
+
+        Returns:
+            Balance dictionary or None if error
+        """
+        addr = self.normalize_address(address)
+        balance_raw = self.get_balance(addr)
+
+        if balance_raw is None:
+            return None
+
+        amount = self.normalize_amount(str(balance_raw), 8)
+        return {
+            "symbol": "APT",
+            "address": "0x1::aptos_coin::AptosCoin",
+            "decimals": 8,
+            "raw": str(balance_raw),
+            "amount": float(amount),
+            "chain": "aptos"
+        }
+
     def get_token_balances(self, address: str) -> List[Dict[str, Any]]:
         """
         Get all token balances for Aptos address.
-        
+
         Returns:
             List of token balance dictionaries
         """
@@ -175,8 +204,8 @@ class AptosAdapter(ChainAdapter):
                     "amount": float(amount)
                 })
             
-            except Exception as e:
-                print(f"[ERROR] Failed to fetch {symbol} balance: {e}")
+            except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
+                logger.error("Failed to fetch %s balance: %s", symbol, e)
                 continue
         
         return balances
@@ -255,8 +284,8 @@ class AptosAdapter(ChainAdapter):
             
             return user_txns
         
-        except Exception as e:
-            print(f"[ERROR] Failed to fetch Aptos transactions: {e}")
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError, KeyError) as e:
+            logger.error("Failed to fetch Aptos transactions: %s", e)
             return []
     
     # ============================================================
@@ -290,5 +319,6 @@ class AptosAdapter(ChainAdapter):
         """Cleanup on deletion."""
         try:
             self.close()
-        except:
+        except Exception:
+            # Ignore cleanup errors during garbage collection
             pass

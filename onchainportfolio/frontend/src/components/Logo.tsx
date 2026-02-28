@@ -47,9 +47,8 @@ const Logo: React.FC<LogoProps> = ({
         <span className={`${iconText} font-bold ${config.iconText}`}>C</span>
       </div>
       
-      {/* Text - "Chain" in theme color, "IQ" stays emphasized */}
       <span className={`font-bold ${config.fontSize} ${textColor}`}>
-        Chain<span className={theme === "dark" ? "text-white" : "text-gray-900"}>IQ</span>
+        Chain<span className={theme === "dark" ? "text-white" : "text-gray-900"}>Lens</span>
       </span>
     </div>
   );
