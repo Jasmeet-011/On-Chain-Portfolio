@@ -9,6 +9,7 @@ from pymongo.collection import Collection
 from bson import ObjectId
 import logging
 
+from app.config import settings
 from app.services.price_service import PriceService
 from app.services.email_service import EmailService
 from app.models.alert_models import (
@@ -719,8 +720,10 @@ class AlertService:
             }
         )
 
-        # Send notification (implement as needed)
         logger.info(f"[ALERTS] Portfolio alert {alert_id} triggered: {current_value}")
+
+        # Send email notification
+        await self._send_portfolio_alert_email(alert, current_value, portfolio_data)
 
         return {
             "alert_id": alert_id,
@@ -754,6 +757,9 @@ class AlertService:
         )
 
         logger.info(f"[ALERTS] Wallet alert {alert_id} triggered: ${current_value:.2f}")
+
+        # Send email notification
+        await self._send_wallet_alert_email(alert, current_value, wallet_data)
 
         return {
             "alert_id": alert_id,
@@ -822,6 +828,202 @@ class AlertService:
             logger.info(f"[ALERTS] ✅ Email sent to {user_email}")
         except Exception as e:
             logger.error(f"[ALERTS] ❌ Failed to send email to {user_email}: {e}")
+
+    async def _send_portfolio_alert_email(self, alert_doc: dict, current_value: float, portfolio_data: dict):
+        """Send portfolio-level alert notification email"""
+
+        user_email = alert_doc.get("user_email", "")
+        user_id = alert_doc["user_id"]
+
+        if not user_email:
+            return
+
+        # Check email verification
+        try:
+            from app.services.auth_service import get_user_by_id
+            user = get_user_by_id(user_id)
+            if user and not user.get("is_email_verified", True):
+                if "is_email_verified" in user:
+                    logger.info(f"[ALERTS] User {user_email} email not verified, skipping portfolio alert email")
+                    return
+        except Exception:
+            pass
+
+        # Check user preference
+        prefs = self.preferences.find_one({"user_id": user_id})
+        if prefs and not prefs.get("price_alerts_enabled", True):
+            return
+
+        metric = alert_doc.get("portfolio_metric", "value")
+        condition = alert_doc.get("condition", "above")
+        target_value = alert_doc.get("target_value", 0)
+
+        metric_labels = {
+            "value": "Portfolio Value",
+            "change_percent": "Portfolio Change",
+            "risk_level": "Risk Level",
+            "concentration": "Token Concentration",
+        }
+        metric_label = metric_labels.get(metric, metric)
+
+        if metric == "value":
+            current_display = f"${current_value:,.2f}"
+            target_display = f"${target_value:,.2f}"
+        elif metric == "change_percent":
+            current_display = f"{current_value:+.2f}%"
+            target_display = f"{target_value:.2f}%"
+        elif metric == "concentration":
+            current_display = f"{current_value:.1f}%"
+            target_display = f"{target_value:.1f}%"
+        else:
+            current_display = str(current_value)
+            target_display = str(target_value)
+
+        subject = f"🔔 Portfolio Alert: {metric_label} is {condition} {target_display}"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+                .header {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 30px; text-align: center; }}
+                .content {{ padding: 30px; }}
+                .value-box {{ background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center; }}
+                .current-value {{ font-size: 36px; font-weight: bold; color: #1a1a2e; }}
+                .target-info {{ color: #666; margin-top: 10px; }}
+                .footer {{ background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 12px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔔 Portfolio Alert Triggered</h1>
+                    <p>Your {metric_label} has crossed your target</p>
+                </div>
+                <div class="content">
+                    <p>Hi {user_email.split('@')[0].title()},</p>
+                    <p>Your portfolio alert has been triggered:</p>
+                    <div class="value-box">
+                        <div class="current-value">{current_display}</div>
+                        <div class="target-info">{metric_label} is now {condition} your target of {target_display}</div>
+                    </div>
+                    <p>Portfolio summary: {portfolio_data.get('wallet_count', 0)} wallet(s) tracked.</p>
+                    <p><a href="{settings.app_url}/analytics" style="color: #6366f1;">View Analytics →</a></p>
+                </div>
+                <div class="footer"><p>ChainLens · <a href="{settings.app_url}/alerts">Manage Alerts</a></p></div>
+            </div>
+        </body>
+        </html>
+        """
+
+        plain_content = (
+            f"Portfolio Alert: {metric_label} is {condition} {target_display}\n\n"
+            f"Current: {current_display}\n"
+            f"Wallets: {portfolio_data.get('wallet_count', 0)}\n\n"
+            f"View your portfolio: {settings.app_url}\n"
+        )
+
+        try:
+            self.email_service._send_email(
+                to_email=user_email,
+                subject=subject,
+                html_content=html_content,
+                plain_content=plain_content
+            )
+            logger.info(f"[ALERTS] ✅ Portfolio alert email sent to {user_email}")
+        except Exception as e:
+            logger.error(f"[ALERTS] ❌ Failed to send portfolio alert email to {user_email}: {e}")
+
+    async def _send_wallet_alert_email(self, alert_doc: dict, current_value: float, wallet_data: dict):
+        """Send wallet-level alert notification email"""
+
+        user_email = alert_doc.get("user_email", "")
+        user_id = alert_doc["user_id"]
+
+        if not user_email:
+            return
+
+        # Check email verification
+        try:
+            from app.services.auth_service import get_user_by_id
+            user = get_user_by_id(user_id)
+            if user and not user.get("is_email_verified", True):
+                if "is_email_verified" in user:
+                    logger.info(f"[ALERTS] User {user_email} email not verified, skipping wallet alert email")
+                    return
+        except Exception:
+            pass
+
+        # Check user preference
+        prefs = self.preferences.find_one({"user_id": user_id})
+        if prefs and not prefs.get("price_alerts_enabled", True):
+            return
+
+        wallet_address = alert_doc.get("wallet_address", "")
+        condition = alert_doc.get("condition", "above")
+        target_value = alert_doc.get("target_value", 0)
+        chain = wallet_data.get("chain", alert_doc.get("chain", ""))
+        short_address = f"{wallet_address[:6]}...{wallet_address[-4:]}" if len(wallet_address) > 10 else wallet_address
+
+        subject = f"🔔 Wallet Alert: {short_address} value is {condition} ${target_value:,.2f}"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+                .header {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 30px; text-align: center; }}
+                .content {{ padding: 30px; }}
+                .value-box {{ background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: center; }}
+                .current-value {{ font-size: 36px; font-weight: bold; color: #1a1a2e; }}
+                .wallet-address {{ font-family: monospace; color: #666; font-size: 13px; margin-top: 8px; }}
+                .footer {{ background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 12px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔔 Wallet Alert Triggered</h1>
+                    <p>A wallet has crossed your value threshold</p>
+                </div>
+                <div class="content">
+                    <p>Hi {user_email.split('@')[0].title()},</p>
+                    <p>Your wallet alert has been triggered:</p>
+                    <div class="value-box">
+                        <div class="current-value">${current_value:,.2f}</div>
+                        <div class="wallet-address">{wallet_address}</div>
+                        <div style="color: #888; font-size: 12px; margin-top: 4px;">{chain.upper() if chain else "Multi-chain"}</div>
+                        <div style="color: #666; margin-top: 8px;">Wallet value is now {condition} your target of ${target_value:,.2f}</div>
+                    </div>
+                    <p><a href="{settings.app_url}" style="color: #6366f1;">View Portfolio →</a></p>
+                </div>
+                <div class="footer"><p>ChainLens · <a href="{settings.app_url}/alerts">Manage Alerts</a></p></div>
+            </div>
+        </body>
+        </html>
+        """
+
+        plain_content = (
+            f"Wallet Alert: {short_address} value is {condition} ${target_value:,.2f}\n\n"
+            f"Current wallet value: ${current_value:,.2f}\n"
+            f"Wallet: {wallet_address}\n\n"
+            f"View your portfolio: {settings.app_url}\n"
+        )
+
+        try:
+            self.email_service._send_email(
+                to_email=user_email,
+                subject=subject,
+                html_content=html_content,
+                plain_content=plain_content
+            )
+            logger.info(f"[ALERTS] ✅ Wallet alert email sent to {user_email}")
+        except Exception as e:
+            logger.error(f"[ALERTS] ❌ Failed to send wallet alert email to {user_email}: {e}")
 
     # ============================================================
     # DAILY DIGEST (Called by Scheduler)
@@ -973,6 +1175,13 @@ class AlertService:
         except Exception as e:
             logger.warning(f"[ALERTS] Could not fetch price changes for weekly summary: {e}")
 
+        # Fetch portfolio suggestions to include in weekly email
+        suggestions = []
+        try:
+            suggestions = await self.get_portfolio_suggestions(user_id)
+        except Exception as e:
+            logger.warning(f"[ALERTS] Could not fetch suggestions for weekly email: {e}")
+
         email_data = WeeklySummaryEmailData(
             user_email=user_email,
             user_name=user_email.split("@")[0].title(),
@@ -983,7 +1192,8 @@ class AlertService:
             best_performer=best_performer,
             worst_performer=worst_performer,
             alerts_triggered=alerts_triggered,
-            total_tokens=len(portfolio["token_totals"])
+            total_tokens=len(portfolio["token_totals"]),
+            suggestions=suggestions[:3] if suggestions else []  # Top 3 suggestions
         )
 
         self.email_service.send_weekly_summary(email_data)

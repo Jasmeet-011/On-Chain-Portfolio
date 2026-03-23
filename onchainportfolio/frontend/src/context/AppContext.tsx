@@ -15,6 +15,7 @@ import type { WalletResponse } from "../api";
 import type { ChainType, WalletType } from "../api";
 
 export type Theme = "light" | "dark";
+export type NetworkMode = "testnet" | "mainnet";
 
 // ✅ UPDATED: Extended WalletInfo with multi-chain support (Aptos, Solana, EVM)
 export interface ExtendedWalletInfo {
@@ -78,6 +79,8 @@ export interface AppContextType {
   setPortfolioData: (data: any) => void;
   theme: Theme;
   toggleTheme: () => void;
+  networkMode: NetworkMode;
+  toggleNetwork: () => void;
   clearPortfolio: () => void;
   currentUser: { id: string; name: string; email: string } | null;
   setCurrentUser: (user: { id: string; name: string; email: string } | null) => void;
@@ -147,6 +150,19 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   }, [currentUser?.id]);
   
   const { theme, toggleTheme } = useThemeInternal();
+
+  const [networkMode, setNetworkMode] = useState<NetworkMode>(() => {
+    const saved = localStorage.getItem("networkMode");
+    return saved === "mainnet" ? "mainnet" : "testnet";
+  });
+
+  const toggleNetwork = () => {
+    setNetworkMode((prev) => {
+      const next: NetworkMode = prev === "testnet" ? "mainnet" : "testnet";
+      localStorage.setItem("networkMode", next);
+      return next;
+    });
+  };
 
   const [wallets, setWallets] = useState<ExtendedWalletInfo[]>([]);
   const [activeWallet, setActiveWalletInternal] = useState<ExtendedWalletInfo | null>(null);
@@ -846,6 +862,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setPortfolioData,
     theme,
     toggleTheme,
+    networkMode,
+    toggleNetwork,
     clearPortfolio,
     currentUser,
     setCurrentUser,

@@ -5,7 +5,7 @@ import { api } from "../api";
 import PortfolioHistoryChart from "../components/PortfolioHistoryChart";
 import TokenMiniChart from "../components/TokenMiniChart";
 import InsightsSection from "../components/InsightsSection";
-import { BarChart3, RefreshCw, Lightbulb, TrendingUp } from "lucide-react";
+import { BarChart3, RefreshCw, Lightbulb, TrendingUp, AlertTriangle } from "lucide-react";
 
 interface UniqueToken {
   symbol: string;
@@ -209,8 +209,8 @@ const AnalyticsPage: React.FC = () => {
         <div className={`rounded-xl p-12 text-center ${
           theme === "dark" ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-gray-200 shadow-sm"
         }`}>
-          <div className="text-4xl mb-4">⚠️</div>
-          <h3 className={`text-xl font-bold mb-2 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+          <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-4" />
+          <h3 className={`text-lg font-bold mb-2 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
             Error Loading Portfolio
           </h3>
           <p className={`mb-6 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
@@ -253,14 +253,14 @@ const AnalyticsPage: React.FC = () => {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Page Header with Scope Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className={`text-2xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+          <h2 className={`text-xl font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
             Portfolio Analytics
           </h2>
-          <p className={`text-sm mt-1 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+          <p className={`text-sm mt-0.5 ${theme === "dark" ? "text-zinc-400" : "text-gray-500"}`}>
             Viewing: <span className={`font-medium ${theme === "dark" ? "text-white" : "text-gray-900"}`}>{scopeLabel}</span>
             {selectedScope === 'complete' && walletGroups.length > 1 && (
               <span className="ml-2">
@@ -353,9 +353,9 @@ const AnalyticsPage: React.FC = () => {
       {/* Token Performance Section */}
       {uniqueTokens.length > 0 && (
         <div>
-          <h3 className={`text-lg font-bold mb-4 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+          <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${theme === "dark" ? "text-zinc-500" : "text-gray-400"}`}>
             Token Performance
-          </h3>
+          </p>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {uniqueTokens.map((token: UniqueToken) => (

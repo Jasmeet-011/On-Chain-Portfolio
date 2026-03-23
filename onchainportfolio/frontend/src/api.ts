@@ -1,4 +1,4 @@
-// src/api.ts - UPDATED: Added Wallet Filtering Support
+// src/api.ts
 
 // Toggle this to switch between mock and real backend
 export const MOCK_MODE = false;
@@ -8,6 +8,16 @@ const API_ORIGIN = import.meta.env.VITE_API_ORIGIN || "http://localhost:8000";
 
 const API_BASE_URL = `${API_ORIGIN}/v1`;
 const AUTH_BASE_URL = `${API_ORIGIN}/auth`;
+
+// ============================================================
+// Network Mode
+// ============================================================
+// Reads from localStorage so it stays in sync with AppContext's
+// networkMode state without requiring prop-drilling into api.ts.
+
+export function isTestnet(): boolean {
+  return localStorage.getItem("networkMode") !== "mainnet";
+}
 
 
 // ============================================================
@@ -101,14 +111,14 @@ export const api = {
   /**
    * Get token balances for a wallet
    */
-  async getBalances(address: string, chain: string = "aptos") {
+  async getBalances(address: string, chain: string = "aptos", testnet: boolean = isTestnet()) {
     if (MOCK_MODE) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       return MOCK_RESPONSE.portfolio.wallets[0].data.balances;
     }
 
     try {
-      const res = await fetch(`${API_BASE_URL}/wallets/${address}/balances?chain=${chain}`);
+      const res = await fetch(`${API_BASE_URL}/wallets/${address}/balances?chain=${chain}&testnet=${testnet}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     } catch (error) {
@@ -163,7 +173,11 @@ export const api = {
   /**
    * Chat with AI about portfolio
    */
-  async chat(question: string, scope: string = "all") {
+  async chat(
+    question: string,
+    scope: string = "all",
+    history?: { role: string; text: string }[]
+  ) {
     if (MOCK_MODE) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       return MOCK_RESPONSE;
@@ -174,8 +188,9 @@ export const api = {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          question: question,
-          scope: scope,
+          question,
+          scope,
+          history: history ?? [],
         }),
       });
       
@@ -205,7 +220,8 @@ export const api = {
         `${API_BASE_URL}/wallets/${address}/transactions?chain=${chain}&limit=${limit}`
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+      const data = await res.json();
+      return data.transactions || [];
     } catch (error) {
       console.error("Failed to fetch transactions:", error);
       throw error;
@@ -720,7 +736,13 @@ export const api = {
         }
       );
       
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.detail || "No snapshot data available yet. Snapshots are captured every 6 hours — check back later.");
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
       return res.json();
     } catch (error) {
       console.error("Failed to fetch detailed portfolio history:", error);
@@ -902,6 +924,45 @@ export const api = {
   },
 
   // ============================================================
+  // TELEGRAM BOT
+  // ============================================================
+
+  /**
+   * Generate a short-lived 6-char code to link the user's Telegram account.
+   */
+  async generateTelegramLink(): Promise<{ code: string; expires_in_minutes: number; instructions: string }> {
+    const res = await fetch(`${API_BASE_URL}/telegram/generate-link`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
+
+  /**
+   * Check whether the current user has linked their Telegram account.
+   */
+  async getTelegramStatus(): Promise<{ linked: boolean; chat_id: number | null }> {
+    const res = await fetch(`${API_BASE_URL}/telegram/status`, {
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
+
+  /**
+   * Unlink the current user's Telegram account.
+   */
+  async unlinkTelegram(): Promise<{ message: string }> {
+    const res = await fetch(`${API_BASE_URL}/telegram/unlink`, {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  },
+
+  // ============================================================
   // EMAIL VERIFICATION
   // ============================================================
 
@@ -1019,7 +1080,7 @@ export const api = {
    * Get multi-chain balances for a wallet address
    * Auto-detects address type and queries all applicable chains
    */
-  async getMultiChainBalances(address: string, testnet: boolean = true): Promise<MultiChainBalanceResponse> {
+  async getMultiChainBalances(address: string, testnet: boolean = isTestnet()): Promise<MultiChainBalanceResponse> {
     try {
       const res = await fetch(
         `${API_BASE_URL}/wallets/${address}/multi-chain-balances?testnet=${testnet}`,
@@ -1045,7 +1106,7 @@ export const api = {
    */
   async getGroupPortfolio(
     wallets: Array<{ address: string; chain: string }>,
-    testnet: boolean = true
+    testnet: boolean = isTestnet()
   ): Promise<GroupPortfolioResponse> {
     try {
       const res = await fetch(`${API_BASE_URL}/portfolio/multi-wallet`, {
@@ -1062,12 +1123,13 @@ export const api = {
     }
   },
 
-  async getMultiChainPortfolio(address: string, testnet: boolean = true): Promise<MultiChainPortfolioResponse> {
+  async getMultiChainPortfolio(address: string, testnet: boolean = isTestnet()): Promise<GroupPortfolioResponse> {
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/wallets/${address}/multi-chain-portfolio?testnet=${testnet}`,
-        { headers: getAuthHeaders() }
-      );
+      const res = await fetch(`${API_BASE_URL}/portfolio/multi-wallet`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ wallets: [{ address, chain: "evm" }], testnet }),
+      });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
@@ -1118,6 +1180,10 @@ export interface TokenBalance {
   amount: number;
   usd_price?: number;
   usd_value?: number;
+  change_24h?: number | null;  // 24-hour price change %
+  chain?: string;
+  wallet_name?: string;
+  wallet_address?: string;
 }
 
 export interface Portfolio {

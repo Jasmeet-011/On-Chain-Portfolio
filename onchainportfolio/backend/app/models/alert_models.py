@@ -430,6 +430,7 @@ class WeeklySummaryEmailData(BaseModel):
     worst_performer: Optional[dict] = None
     alerts_triggered: int
     total_tokens: int
+    suggestions: Optional[list] = None  # Portfolio rebalancing suggestions
     
     class Config:
         json_schema_extra = {

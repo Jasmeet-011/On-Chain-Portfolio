@@ -8,8 +8,35 @@ from typing import Optional, List, Dict, Any, Tuple
 from bson import ObjectId
 from datetime import datetime, timezone
 
-from .db import wallets_collection, users_collection
+from .db import wallets_collection, users_collection, portfolio_events_collection
 from .adapters import get_adapter_for_chain, SUPPORTED_CHAINS, is_evm_chain
+
+
+# ============================================================
+# Internal Helpers
+# ============================================================
+
+def _emit_wallet_event(
+    user_id: str,
+    event_type: str,
+    wallet_address: str,
+    chain: str,
+    timestamp: datetime
+) -> None:
+    """
+    Insert a single lifecycle event into portfolio_events.
+    Fire-and-forget — failure is logged, never raised.
+    """
+    try:
+        portfolio_events_collection.insert_one({
+            "user_id": user_id,
+            "event_type": event_type,          # "wallet_added" | "wallet_removed"
+            "wallet_address": wallet_address,
+            "chain": chain,
+            "timestamp": timestamp
+        })
+    except Exception as e:
+        print(f"[WALLET] Failed to log event {event_type}: {e}")
 
 
 # ============================================================
@@ -131,17 +158,50 @@ def create_wallet(
         # Step 2: Normalize address
         normalized_addr = normalize_wallet_address(address, chain)
         
-        # Step 3: Check for duplicates (same user + address + chain)
-        existing = wallets_collection.find_one({
+        # Step 3: Check for active duplicates (same user + address + chain)
+        existing_active = wallets_collection.find_one({
             "user_id": user_id,
             "address": normalized_addr,
-            "chain": chain
+            "chain": chain,
+            "is_active": True
         })
-        
-        if existing:
+        if existing_active:
             print(f"[WALLET] Wallet already exists for user {user_id} on {chain}")
             return None
-        
+
+        # If a soft-deleted record exists for this address, reactivate it.
+        # This preserves the unique index on (user_id, address).
+        existing_deleted = wallets_collection.find_one({
+            "user_id": user_id,
+            "address": normalized_addr,
+            "chain": chain,
+            "is_active": False
+        })
+        if existing_deleted:
+            now = datetime.now(timezone.utc)
+            wallets_collection.update_one(
+                {"_id": existing_deleted["_id"]},
+                {"$set": {
+                    "is_active": True,
+                    "deleted_at": None,
+                    "label": label,
+                    "type": wallet_type,
+                    "created_at": now.isoformat()  # reset lifecycle timestamp
+                }}
+            )
+            wallet_doc = dict(existing_deleted)
+            wallet_doc["id"] = str(existing_deleted["_id"])
+            wallet_doc.pop("_id", None)
+            wallet_doc.update({
+                "is_active": True,
+                "deleted_at": None,
+                "label": label,
+                "created_at": now.isoformat()
+            })
+            _emit_wallet_event(user_id, "wallet_added", normalized_addr, chain, now)
+            print(f"[WALLET] Reactivated soft-deleted wallet {normalized_addr[:10]}... for user {user_id}")
+            return wallet_doc
+
         # Step 4: Handle primary wallet logic
         user_wallets = list_user_wallets(user_id)
         
@@ -156,6 +216,7 @@ def create_wallet(
             is_primary = True
         
         # Step 5: Create wallet document
+        now = datetime.now(timezone.utc)
         wallet_doc = {
             "user_id": user_id,
             "address": normalized_addr,
@@ -163,22 +224,25 @@ def create_wallet(
             "type": wallet_type,
             "label": label,
             "is_primary": is_primary,
-            "created_at": datetime.now(timezone.utc).isoformat()
+            "is_active": True,
+            "deleted_at": None,
+            "created_at": now.isoformat()
         }
-        
+
         result = wallets_collection.insert_one(wallet_doc)
-        
+
         # Convert _id to id for JSON response
         wallet_doc["id"] = str(result.inserted_id)
         del wallet_doc["_id"]
-        
+
         # Update user's legacy wallet_address field if primary
         if is_primary:
             users_collection.update_one(
                 {"_id": ObjectId(user_id)},
                 {"$set": {"wallet_address": normalized_addr}}
             )
-        
+
+        _emit_wallet_event(user_id, "wallet_added", normalized_addr, chain, now)
         print(f"[WALLET] Created wallet {normalized_addr[:10]}... for user {user_id} on {chain}")
         return wallet_doc
         
@@ -204,10 +268,10 @@ def list_user_wallets(
         List of wallet documents
     """
     try:
-        query = {"user_id": user_id}
+        query = {"user_id": user_id, "is_active": True}
         if chain:
             query["chain"] = chain
-        
+
         wallets = list(wallets_collection.find(query))
         
         # Convert ObjectId to string
@@ -243,13 +307,13 @@ def get_wallet_by_address(
         Wallet document or None
     """
     try:
-        # Try exact match first
-        query = {"user_id": user_id, "address": address}
+        # Try exact match first (active only)
+        query = {"user_id": user_id, "address": address, "is_active": True}
         if chain:
             query["chain"] = chain
-        
+
         wallet = wallets_collection.find_one(query)
-        
+
         # Try case-insensitive match for EVM addresses
         if not wallet:
             query["address"] = address.lower()
@@ -273,7 +337,8 @@ def get_primary_wallet(user_id: str) -> Optional[Dict[str, Any]]:
     try:
         wallet = wallets_collection.find_one({
             "user_id": user_id,
-            "is_primary": True
+            "is_primary": True,
+            "is_active": True
         })
         
         if wallet:
@@ -322,19 +387,19 @@ def set_primary_wallet(
     Removes primary flag from all other wallets.
     """
     try:
-        # Find the wallet
-        query = {"user_id": user_id, "address": address}
+        # Find the wallet (active only)
+        query = {"user_id": user_id, "address": address, "is_active": True}
         if chain:
             query["chain"] = chain
-        
+
         wallet = wallets_collection.find_one(query)
         if not wallet:
             print(f"[WALLET] Wallet not found: {address}")
             return False
-        
-        # Remove primary from all wallets
+
+        # Remove primary from all active wallets
         wallets_collection.update_many(
-            {"user_id": user_id},
+            {"user_id": user_id, "is_active": True},
             {"$set": {"is_primary": False}}
         )
         
@@ -364,62 +429,94 @@ def delete_wallet(
     chain: Optional[str] = None
 ) -> bool:
     """
-    Delete a wallet.
-    If deleting primary wallet, sets another wallet as primary.
+    Soft-delete a wallet (sets is_active=False, deleted_at=now).
+    Hard delete is never performed to preserve analytics history.
+    If deleting primary wallet, promotes the next active wallet to primary.
     """
     try:
-        query = {"user_id": user_id, "address": address}
+        query = {"user_id": user_id, "address": address, "is_active": True}
         if chain:
             query["chain"] = chain
-        
-        # Check if wallet exists and if it's primary
+
         wallet = wallets_collection.find_one(query)
         if not wallet:
-            print(f"[WALLET] Wallet not found: {address}")
+            print(f"[WALLET] Wallet not found or already deleted: {address}")
             return False
-        
+
         was_primary = wallet.get("is_primary", False)
-        
-        # Delete the wallet
-        result = wallets_collection.delete_one(query)
-        
-        if result.deleted_count == 0:
+        wallet_chain = wallet.get("chain", "unknown")
+        now = datetime.now(timezone.utc)
+
+        # Soft delete: mark inactive
+        result = wallets_collection.update_one(
+            {"_id": wallet["_id"]},
+            {"$set": {
+                "is_active": False,
+                "is_primary": False,
+                "deleted_at": now.isoformat()
+            }}
+        )
+
+        if result.modified_count == 0:
             return False
-        
-        # If this was primary, set another wallet as primary
+
+        _emit_wallet_event(user_id, "wallet_removed", address, wallet_chain, now)
+
+        # If this was primary, promote the next active wallet
         if was_primary:
-            remaining_wallets = list_user_wallets(user_id)
+            remaining_wallets = list_user_wallets(user_id)  # returns active only
             if remaining_wallets:
                 set_primary_wallet(user_id, remaining_wallets[0]["address"])
             else:
-                # No wallets left, clear legacy field
                 users_collection.update_one(
                     {"_id": ObjectId(user_id)},
                     {"$set": {"wallet_address": None}}
                 )
-        
-        print(f"[WALLET] Deleted wallet {address[:10]}... for user {user_id}")
+
+        print(f"[WALLET] Soft-deleted wallet {address[:10]}... for user {user_id}")
         return True
-        
+
     except Exception as e:
         print(f"[WALLET] Error deleting wallet: {e}")
         return False
 
 
 def delete_all_user_wallets(user_id: str) -> bool:
-    """Delete all wallets for a user."""
+    """Soft-delete all active wallets for a user."""
     try:
-        result = wallets_collection.delete_many({"user_id": user_id})
-        
+        now = datetime.now(timezone.utc)
+
+        # Fetch active wallets before marking them deleted (for event logging)
+        active_wallets = list(wallets_collection.find(
+            {"user_id": user_id, "is_active": True},
+            {"address": 1, "chain": 1}
+        ))
+
+        result = wallets_collection.update_many(
+            {"user_id": user_id, "is_active": True},
+            {"$set": {
+                "is_active": False,
+                "is_primary": False,
+                "deleted_at": now.isoformat()
+            }}
+        )
+
+        # Emit one event per wallet
+        for w in active_wallets:
+            _emit_wallet_event(
+                user_id, "wallet_removed",
+                w.get("address", ""), w.get("chain", "unknown"), now
+            )
+
         # Clear legacy field
         users_collection.update_one(
             {"_id": ObjectId(user_id)},
             {"$set": {"wallet_address": None}}
         )
-        
-        print(f"[WALLET] Deleted {result.deleted_count} wallets for user {user_id}")
+
+        print(f"[WALLET] Soft-deleted {result.modified_count} wallets for user {user_id}")
         return True
-        
+
     except Exception as e:
         print(f"[WALLET] Error deleting all wallets: {e}")
         return False
@@ -433,7 +530,7 @@ def get_wallet_stats_by_chain(user_id: str) -> Dict[str, int]:
     """Get wallet count grouped by chain."""
     try:
         pipeline = [
-            {"$match": {"user_id": user_id}},
+            {"$match": {"user_id": user_id, "is_active": True}},
             {"$group": {"_id": "$chain", "count": {"$sum": 1}}}
         ]
         

@@ -12,25 +12,28 @@ from app.models.dto import WalletPortfolioResult, AggregatedPortfolio, TokenAggr
 class AIService:
     """
     AI service for portfolio analysis with optimized, context-aware responses.
-    
-    Uses google-generativeai (stable API)
+
+    Uses google-generativeai (stable API) with multi-turn conversation support.
     """
-    
+
     def __init__(self, api_key: Optional[str] = None):
         """
         Initialize AI service.
-        
+
         Args:
             api_key: Gemini API key (optional, falls back to env var)
         """
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        
+
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY not provided and not found in environment")
-        
-        # Configure Gemini
+
+        # Configure Gemini with system instruction for portfolio assistant role
         genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel("gemini-1.5-flash")
+        self.model = genai.GenerativeModel(
+            "gemini-1.5-flash",
+            system_instruction=self._build_system_prompt()
+        )
 
     def _extract_token_from_query(self, query: str) -> Optional[str]:
         """
@@ -219,41 +222,64 @@ Bad Response:
 
 Remember: Context-aware, wallet-focused, address-free!"""
 
+    def _build_gemini_history(self, history: Optional[List[Dict[str, str]]]) -> List[Dict]:
+        """
+        Convert frontend conversation history to Gemini's chat history format.
+
+        Gemini expects: [{"role": "user", "parts": ["text"]}, {"role": "model", "parts": ["text"]}]
+        Frontend sends: [{"role": "user"/"assistant", "text": "..."}]
+        """
+        if not history:
+            return []
+
+        gemini_history = []
+        for turn in history:
+            role = "model" if turn.get("role") == "assistant" else "user"
+            text = turn.get("text", "")
+            if text:
+                gemini_history.append({"role": role, "parts": [text]})
+
+        return gemini_history
+
     def generate_response(
         self,
         query: str,
         portfolio: AggregatedPortfolio,
-        wallet_results: List[WalletPortfolioResult]
+        wallet_results: List[WalletPortfolioResult],
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """
-        Generate optimized AI response using Gemini.
-        
+        Generate AI response using Gemini, with optional conversation history.
+
         Args:
-            query: User's question
+            query: User's current question
             portfolio: Aggregated portfolio data
             wallet_results: Individual wallet results
-            
+            history: Prior conversation turns (role + text)
+
         Returns:
             Optimized, context-aware response
         """
         try:
-            # Build smart context
+            # Build portfolio context for this turn
             context = self._build_smart_context(query, portfolio, wallet_results)
-            system_prompt = self._build_system_prompt()
-            
-            # Generate response
-            full_prompt = f"{system_prompt}\n\n{context}\n\nUser Question: {query}\n\nYour Response:"
-            
-            response = self.model.generate_content(full_prompt)
-            
+            # Combine context with the user's question as a single message
+            full_prompt = f"{context}\n\nUser Question: {query}\n\nYour Response:"
+
+            # Convert prior turns to Gemini history format
+            gemini_history = self._build_gemini_history(history)
+
+            # Start a chat session with prior history, then send the new message
+            chat_session = self.model.start_chat(history=gemini_history)
+            response = chat_session.send_message(full_prompt)
+
             if response and response.text:
                 return response.text.strip()
-            
+
             return "I couldn't generate a response. Please try again."
-                
+
         except Exception as e:
             print(f"Error generating AI response: {e}")
-            # Fall back to non-AI response
             return self.generate_fallback_response(query, portfolio)
 
     def generate_fallback_response(
@@ -306,16 +332,18 @@ def generate_portfolio_response(
     query: str,
     portfolio: AggregatedPortfolio,
     wallet_results: List[WalletPortfolioResult],
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """
-    Generate optimized AI response.
-    
+    Generate optimized AI response with optional conversation history.
+
     Args:
         query: User's question
         portfolio: Aggregated portfolio data
         wallet_results: Individual wallet results
         api_key: Optional API key (falls back to env var)
+        history: Prior conversation turns for multi-turn context
     """
     service = AIService(api_key=api_key)
-    return service.generate_response(query, portfolio, wallet_results)
+    return service.generate_response(query, portfolio, wallet_results, history=history)

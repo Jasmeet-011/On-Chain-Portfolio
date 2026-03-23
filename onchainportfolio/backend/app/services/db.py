@@ -64,6 +64,20 @@ nfts_collection = db["nfts"]
 
 
 # ============================================================
+# PORTFOLIO EVENT LOG
+# ============================================================
+
+portfolio_events_collection = db["portfolio_events"]
+
+
+# ============================================================
+# MIGRATION TRACKING
+# ============================================================
+
+migrations_collection = db["migrations"]
+
+
+# ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
@@ -264,7 +278,33 @@ def setup_indexes():
         nfts_collection.create_index([("user_id", ASCENDING)])
         nfts_collection.create_index([("wallet_address", ASCENDING)])
         print("[DB] ✅ Created indexes on nfts collection")
-        
+
+        # ============================================================
+        # PORTFOLIO EVENTS INDEXES
+        # ============================================================
+
+        # Fast lookup: all events for a user, sorted by time
+        portfolio_events_collection.create_index([
+            ("user_id", ASCENDING),
+            ("timestamp", DESCENDING)
+        ])
+        print("[DB] ✅ Created index on portfolio_events.user_id+timestamp")
+
+        # Filter by event type
+        portfolio_events_collection.create_index([
+            ("user_id", ASCENDING),
+            ("event_type", ASCENDING),
+            ("timestamp", DESCENDING)
+        ])
+        print("[DB] ✅ Created index on portfolio_events.user_id+event_type+timestamp")
+
+        # ============================================================
+        # MIGRATIONS INDEXES
+        # ============================================================
+
+        migrations_collection.create_index([("name", ASCENDING)], unique=True)
+        print("[DB] ✅ Created unique index on migrations.name")
+
         print("[DB] 🎉 All indexes created successfully!")
         
     except Exception as e:
@@ -287,3 +327,5 @@ print(f"  - snapshots_collection")
 print(f"  - portfolio_snapshots_collection")
 print(f"  - price_history_collection")
 print(f"  - nfts_collection")
+print(f"  - portfolio_events_collection")
+print(f"  - migrations_collection")

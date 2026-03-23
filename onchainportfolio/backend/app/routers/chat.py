@@ -1,10 +1,11 @@
-# backend/app/routers/chat.py - COMPLETE FIXED VERSION FOR MONGODB
+# backend/app/routers/chat.py
 """
 Chat Router - Optimized with:
 - Batch price fetching
 - Async parallel wallet fetching
+- Rate limiting (20 requests/minute per IP)
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Optional, Dict, Set, List, Any
 import logging
 import asyncio
@@ -14,6 +15,7 @@ from app.deps import get_current_user, price_service
 from app.services.db import wallets_collection
 from app.services.adapters import get_adapter_for_chain, SUPPORTED_CHAINS
 from app.services.ai_service import generate_portfolio_response
+from app.limiter import limiter
 
 logger = logging.getLogger("chainlens.routers.chat")
 
@@ -208,8 +210,10 @@ def aggregate_portfolios(wallet_results: list[WalletPortfolioResult]) -> Aggrega
 
 
 @router.post("/chat", response_model=ChatResponse)
+@limiter.limit("20/minute")
 async def chat(
-    request: ChatRequest,
+    request: Request,
+    chat_request: ChatRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -228,13 +232,13 @@ async def chat(
         query = {"user_id": user_id}
 
         # Determine which wallets to analyze based on scope
-        if request.scope == "all":
+        if chat_request.scope == "all":
             wallets_cursor = wallets_collection.find(query)
-        elif request.scope == "primary":
+        elif chat_request.scope == "primary":
             query["is_primary"] = True
             wallets_cursor = wallets_collection.find(query)
         else:
-            query["address"] = request.scope
+            query["address"] = chat_request.scope
             wallets_cursor = wallets_collection.find(query)
 
         wallets = list(wallets_cursor)
@@ -339,18 +343,24 @@ async def chat(
 
         logger.info(f"Aggregated portfolio: ${aggregated.total_usd_value:.2f} across {aggregated.total_wallets} wallets")
 
-        # Generate optimized AI response
+        # Convert history from ConversationTurn objects to dicts for ai_service
+        history_dicts = None
+        if chat_request.history:
+            history_dicts = [{"role": t.role, "text": t.text} for t in chat_request.history]
+
+        # Generate AI response (with conversation history for multi-turn context)
         answer = generate_portfolio_response(
-            query=request.question,
+            query=chat_request.question,
             portfolio=aggregated,
-            wallet_results=wallet_results
+            wallet_results=wallet_results,
+            history=history_dicts,
         )
 
         return ChatResponse(
             answer=answer,
             portfolio=aggregated,
             wallet_results=wallet_results,
-            scope_used=request.scope
+            scope_used=chat_request.scope
         )
 
     except HTTPException:

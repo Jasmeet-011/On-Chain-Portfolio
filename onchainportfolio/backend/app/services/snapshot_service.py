@@ -61,9 +61,11 @@ class SnapshotService:
         if wallet_id:
             print(f"[SNAPSHOT]   Wallet filter: {wallet_id}")
         
-        # Get snapshot date (midnight UTC)
+        # Snapshot slot = top of the current UTC hour (e.g. 14:00, not 14:37).
+        # Running every 6 h gives 4 data points per day; the unique index on
+        # (user_id, wallet_id, snapshot_date) prevents double-writes within the slot.
         now = datetime.utcnow()
-        snapshot_date = datetime(now.year, now.month, now.day, 0, 0, 0)
+        snapshot_date = datetime(now.year, now.month, now.day, now.hour, 0, 0)
         
         # Check if snapshot already exists
         if not force:
@@ -77,8 +79,8 @@ class SnapshotService:
                 print(f"[SNAPSHOT] ⚠️  Snapshot already exists for {snapshot_date.date()}")
                 return None
         
-        # Get user wallets
-        wallet_filter = {"user_id": user_id}
+        # Only snapshot wallets that are currently active (soft-delete aware)
+        wallet_filter = {"user_id": user_id, "is_active": True}
         if wallet_id:
             wallet_filter["_id"] = ObjectId(wallet_id)
         
@@ -266,15 +268,20 @@ class SnapshotService:
         snapshots = list(self.snapshots.find(query).sort("snapshot_date", 1))
         
         print(f"[SNAPSHOT] Found {len(snapshots)} snapshots")
-        
+
         if not snapshots:
             print(f"[SNAPSHOT] No snapshots found")
             return None
-        
-        # Calculate coverage
-        coverage_percent = (len(snapshots) / days) * 100
-        
-        print(f"[SNAPSHOT] Coverage: {coverage_percent:.1f}%")
+
+        # Coverage = unique calendar days with at least one snapshot / requested days.
+        # With sub-daily runs we may have multiple snapshots per day; count days, not rows.
+        unique_days_with_data = len(set(
+            s["snapshot_date"].date() for s in snapshots
+            if isinstance(s.get("snapshot_date"), datetime)
+        ))
+        coverage_percent = (unique_days_with_data / max(days, 1)) * 100
+
+        print(f"[SNAPSHOT] Coverage: {coverage_percent:.1f}% ({unique_days_with_data}/{days} days)")
         
         # Format for charts
         values = [

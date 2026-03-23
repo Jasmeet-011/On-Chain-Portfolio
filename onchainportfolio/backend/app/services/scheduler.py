@@ -79,17 +79,18 @@ class AlertScheduler:
         )
         
         # ============================================================
-        # NEW: DAILY SNAPSHOTS - Every day at 00:05 AM
+        # SNAPSHOTS - Every 6 hours (00:05, 06:05, 12:05, 18:05 UTC)
+        # Higher resolution than daily; unique index prevents duplicate slots.
         # ============================================================
         if self.snapshot_service:
             self.scheduler.add_job(
                 func=self._create_daily_snapshots,
-                trigger=CronTrigger(hour=0, minute=5),
-                id="create_daily_snapshots",
-                name="Create daily portfolio snapshots",
+                trigger=IntervalTrigger(hours=6, start_date="2000-01-01 00:05:00"),
+                id="create_snapshots",
+                name="Create portfolio snapshots (every 6 h)",
                 replace_existing=True
             )
-            print("[SCHEDULER] ✨ Snapshot job added")
+            print("[SCHEDULER] ✨ Snapshot job added (every 6 h)")
         
         # Start scheduler
         self.scheduler.start()
@@ -98,7 +99,7 @@ class AlertScheduler:
         print(f"[SCHEDULER] Next daily digest: {self._get_next_run_time('send_daily_digests')}")
         
         if self.snapshot_service:
-            print(f"[SCHEDULER] Next snapshot creation: {self._get_next_run_time('create_daily_snapshots')}")
+            print(f"[SCHEDULER] Next snapshot creation: {self._get_next_run_time('create_snapshots')}")
     
     def stop(self):
         """Stop the scheduler"""

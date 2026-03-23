@@ -93,7 +93,6 @@ def create_user(name: str, email: str, password: str) -> dict:
         "name": name,
         "email": email,
         "password_hash": password_hash,
-        "wallet_address": None,  # DEPRECATED: Kept for backward compatibility
         "is_email_verified": False,
         "email_verification_token": verification_token,
         "created_at": datetime.now(timezone.utc).isoformat()

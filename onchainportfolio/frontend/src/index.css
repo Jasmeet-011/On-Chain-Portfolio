@@ -18,10 +18,19 @@
 
 /* ─── Text rendering ─────────────────────────────────────────────────────── */
 body {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Prevent blue flash on touch highlight */
   -webkit-tap-highlight-color: transparent;
+}
+
+/* ─── Reduced motion ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ─── Focus ring ─────────────────────────────────────────────────────────── */
@@ -86,6 +95,20 @@ body {
   color: transparent;
   background-image: linear-gradient(to right, #3b82f6, #a855f7);
 }
+
+/* ─── Skeleton shimmer ───────────────────────────────────────────────────── */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+/* ─── Numeric / tabular figures ──────────────────────────────────────────── */
+.font-numeric { font-variant-numeric: tabular-nums; }
 
 /* ─── Table improvements ─────────────────────────────────────────────────── */
 table { border-collapse: collapse; }

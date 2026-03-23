@@ -32,7 +32,8 @@ def _normalize_amount(raw: str, decimals: int) -> Decimal:
 @router.get("/wallets/{address}/balances", response_model=List[TokenBalance])
 async def get_balances(
     address: str = Path(..., min_length=3, max_length=200),
-    chain: str = Query("aptos", description="Blockchain: aptos, solana, ethereum, etc.")
+    chain: str = Query("aptos", description="Blockchain: aptos, solana, ethereum, etc."),
+    testnet: bool = Query(True, description="Use testnet (True) or mainnet (False)")
 ):
     """
     Get token balances for a wallet with USD prices.
@@ -44,16 +45,17 @@ async def get_balances(
 
     Supports multiple chains!
     """
+    network = "testnet" if testnet else "mainnet"
 
     try:
         # Get the appropriate adapter for this chain
-        adapter = get_adapter_for_chain(chain)
+        adapter = get_adapter_for_chain(chain, network=network)
         normalized_addr = adapter.normalize_address(address)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Check cache (include chain in cache key)
-    cache_key = f"balances:{chain}:{normalized_addr}"
+    # Check cache (include chain + network in cache key)
+    cache_key = f"balances:{chain}:{network}:{normalized_addr}"
     cached = cache.get(cache_key)
     if cached:
         logger.info(f"Returning cached balances for {normalized_addr} on {chain}")
@@ -82,14 +84,19 @@ async def get_balances(
             if symbol and bal.get("amount", 0) > 0:
                 symbols_to_fetch.add(symbol)
 
-        # Batch fetch all prices at once (ASYNC!)
+        # Batch fetch prices + 24h changes in parallel (ASYNC!)
         prices: Dict[str, float] = {}
+        changes_data: Dict[str, Dict] = {}
         if symbols_to_fetch:
-            logger.info(f"Batch fetching prices for {len(symbols_to_fetch)} tokens")
-            prices = await price_service.get_prices_async(list(symbols_to_fetch), chain=chain)
+            syms_list = list(symbols_to_fetch)
+            logger.info(f"Batch fetching prices+changes for {len(syms_list)} tokens")
+            prices, changes_data = await asyncio.gather(
+                price_service.get_prices_async(syms_list, chain=chain),
+                price_service.get_prices_with_changes_async(syms_list),
+            )
 
         # ============================================================
-        # PHASE 3: Build response with cached prices
+        # PHASE 3: Build response with prices + 24h change
         # ============================================================
         for bal in raw_balances:
             symbol = bal.get("symbol")
@@ -98,11 +105,11 @@ async def get_balances(
             raw_str = bal.get("raw", "0")
             token_address = bal.get("address", "")
 
-            # Convert amount to Decimal
             amount = Decimal(str(amount_float))
-
-            # Get price from batch results
+            # Best price from Binance / Jupiter / CoinGecko fallback chain
             usd_price = prices.get(symbol) if symbol else None
+            # 24h % change from CoinGecko (None if symbol not indexed)
+            change_24h = changes_data.get(symbol, {}).get("change_24h") if symbol else None
             usd_value = None
 
             if usd_price and amount_float > 0:
@@ -116,7 +123,8 @@ async def get_balances(
                     raw=raw_str,
                     amount=amount,
                     usd_price=usd_price,
-                    usd_value=usd_value
+                    usd_value=usd_value,
+                    change_24h=change_24h,
                 )
             )
 
@@ -190,9 +198,15 @@ async def get_multi_chain_balances(
             if not raw_balances:
                 return chain, [], 0.0
 
-            # Get prices
+            # Fetch prices + 24h changes in parallel
             symbols = [b.get("symbol") for b in raw_balances if b.get("symbol")]
-            prices = await price_service.get_prices_async(symbols, chain=chain) if symbols else {}
+            if symbols:
+                prices, changes_data = await asyncio.gather(
+                    price_service.get_prices_async(symbols, chain=chain),
+                    price_service.get_prices_with_changes_async(symbols),
+                )
+            else:
+                prices, changes_data = {}, {}
 
             chain_total = 0.0
             processed = []
@@ -201,6 +215,7 @@ async def get_multi_chain_balances(
                 symbol = bal.get("symbol", "UNKNOWN")
                 amount = bal.get("amount", 0)
                 price = prices.get(symbol)
+                change_24h = changes_data.get(symbol, {}).get("change_24h")
 
                 entry = {
                     "symbol": symbol,
@@ -210,7 +225,8 @@ async def get_multi_chain_balances(
                     "amount": amount,
                     "usd_price": price,
                     "usd_value": None,
-                    "chain": chain
+                    "change_24h": change_24h,
+                    "chain": chain,
                 }
 
                 if price and amount > 0:

@@ -202,13 +202,13 @@ const PortfolioHistoryChart: React.FC<PortfolioHistoryChartProps> = ({
   return (
     <div className={className}>
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
-          <h3 className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+          <h3 className={`text-sm font-semibold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
             {data?.metadata?.scope_label || "Portfolio Value"}
           </h3>
           {data && (
-            <p className={`text-sm mt-1 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
+            <p className={`text-xs mt-0.5 ${theme === "dark" ? "text-zinc-400" : "text-gray-500"}`}>
               {timeRange === "1D" ? "Last 24 hours" : 
                timeRange === "7D" ? "Last 7 days" :
                timeRange === "1M" ? "Last month" :
@@ -223,30 +223,26 @@ const PortfolioHistoryChart: React.FC<PortfolioHistoryChartProps> = ({
         </div>
 
         {/* Time Range Selector */}
-        <div className="flex gap-2 flex-wrap">
+        <div className={`flex gap-1 p-1 rounded-lg ${theme === "dark" ? "bg-zinc-800/60" : "bg-gray-100"}`}>
           {(["1D", "7D", "1M", "3M", "1Y"] as TimeRange[]).map((range) => {
             const supported = isRangeSupported(range);
             const isActive = timeRange === range;
             const disabled = loading || !supported;
-            
+
             return (
               <button
                 key={range}
                 onClick={() => handleTimeRangeChange(range)}
                 disabled={disabled}
                 title={!supported ? getDisabledRangeTooltip(range) : `View ${range} history`}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 ${
                   isActive
-                    ? theme === "dark"
-                      ? "bg-white text-black"
-                      : "bg-black text-white"
+                    ? "bg-blue-600 text-white shadow-sm"
                     : disabled
-                    ? theme === "dark"
-                      ? "bg-zinc-800 text-zinc-600 cursor-not-allowed opacity-50"
-                      : "bg-gray-100 text-gray-400 cursor-not-allowed opacity-50"
+                    ? `${theme === "dark" ? "text-zinc-600" : "text-gray-300"} cursor-not-allowed`
                     : theme === "dark"
-                    ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    ? "text-zinc-400 hover:text-white"
+                    : "text-gray-500 hover:text-gray-900"
                 }`}
               >
                 {range}
@@ -277,11 +273,7 @@ const PortfolioHistoryChart: React.FC<PortfolioHistoryChartProps> = ({
             </p>
             <button
               onClick={fetchData}
-              className={`mt-4 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                theme === "dark"
-                  ? "bg-white text-black hover:bg-gray-200"
-                  : "bg-black text-white hover:bg-gray-800"
-              }`}
+              className="mt-4 px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-blue-600 text-white hover:bg-blue-500"
             >
               Try Again
             </button>

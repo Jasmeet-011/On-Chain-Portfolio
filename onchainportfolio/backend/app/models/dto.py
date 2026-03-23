@@ -1,6 +1,6 @@
 # backend/app/models/dto.py - UPDATED WITH CHAIN FIELD
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 
 
@@ -8,10 +8,17 @@ from typing import Optional, List, Dict, Any
 # Chat Request/Response Models
 # ============================================================
 
+class ConversationTurn(BaseModel):
+    """A single turn in a conversation."""
+    role: str   # "user" or "assistant"
+    text: str
+
+
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
-    question: str
+    question: str = Field(min_length=1, max_length=1000)
     scope: str = "all"  # "all", "primary", or specific wallet address
+    history: Optional[List["ConversationTurn"]] = None  # Prior conversation turns
 
 
 class WalletPortfolioResult(BaseModel):
@@ -106,6 +113,7 @@ class TokenBalance(BaseModel):
     amount: float
     usd_price: Optional[float] = None
     usd_value: Optional[float] = None
+    change_24h: Optional[float] = None   # 24-hour price change %
 
 
 class PortfolioResponse(BaseModel):

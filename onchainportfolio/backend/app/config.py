@@ -124,6 +124,15 @@ class Settings(BaseModel):
     infura_api_key: str = Field(default=os.getenv("INFURA_API_KEY", ""))
     
     # ============================================================
+    # Telegram Bot
+    # ============================================================
+
+    telegram_bot_token: str = Field(default=os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    telegram_enabled: bool = Field(
+        default=os.getenv("TELEGRAM_ENABLED", "true").lower() == "true"
+    )
+
+    # ============================================================
     # Email Service
     # ============================================================
     
@@ -347,9 +356,12 @@ def validate_configuration():
     if not settings.mongodb_uri:
         errors.append("❌ MONGODB_URI is not set")
     
-    # Check JWT secret
+    # Check JWT secret — treat as a hard error in production
     if settings.jwt_secret_key == "your-super-secret-key-change-in-production":
-        warnings.append("⚠️  Using default JWT_SECRET_KEY - CHANGE IN PRODUCTION!")
+        if settings.env == "production":
+            errors.append("❌ JWT_SECRET_KEY is still the default value — set a real secret in production!")
+        else:
+            warnings.append("⚠️  Using default JWT_SECRET_KEY — CHANGE before deploying to production!")
     
     # Check chain RPCs
     if not settings.aptos_node_url and not settings.solana_rpc_url:

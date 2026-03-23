@@ -154,7 +154,7 @@ async def get_portfolio_insights(
     logger.info(f"Generating insights for user {user_id}")
 
     # Get all user wallets
-    wallets = list(wallets_collection.find({"user_id": user_id}))
+    wallets = list(wallets_collection.find({"user_id": user_id, "is_active": True}))
 
     if not wallets:
         logger.info(f"No wallets found for user {user_id}, returning empty insights")

@@ -8,7 +8,7 @@ Supports: Aptos, Solana, Ethereum, Polygon, Base (and their testnets)
 from typing import Optional, Dict, Any, List
 import os
 
-from .base_chain_adapter import BaseChainAdapter
+from .base import ChainAdapter as BaseChainAdapter
 from .base_network_adapter import BaseNetworkAdapter, BaseSepoliaAdapter, get_base_adapter
 # Import Aptos adapter
 try:
@@ -199,23 +199,33 @@ def get_adapter_for_chain(
     if chain_lower == "aptos":
         if not APTOS_AVAILABLE:
             raise ValueError("Aptos adapter not available")
-        
-        # Use testnet RPC by default
-        default_rpc = os.getenv(
-            "APTOS_RPC_URL",
-            "https://fullnode.testnet.aptoslabs.com/v1"
-        )
+
+        if network == "mainnet":
+            default_rpc = os.getenv(
+                "APTOS_MAINNET_RPC_URL",
+                "https://fullnode.mainnet.aptoslabs.com/v1"
+            )
+        else:
+            default_rpc = os.getenv(
+                "APTOS_RPC_URL",
+                "https://fullnode.testnet.aptoslabs.com/v1"
+            )
         return AptosAdapter(rpc_url=rpc_url or default_rpc)
-    
+
     elif chain_lower == "solana":
         if not SOLANA_AVAILABLE:
             raise ValueError("Solana adapter not available")
-        
-        # Use devnet by default
-        default_rpc = os.getenv(
-            "SOLANA_RPC_URL",
-            "https://api.devnet.solana.com"
-        )
+
+        if network == "mainnet":
+            default_rpc = os.getenv(
+                "SOLANA_MAINNET_RPC_URL",
+                "https://api.mainnet-beta.solana.com"
+            )
+        else:
+            default_rpc = os.getenv(
+                "SOLANA_RPC_URL",
+                "https://api.devnet.solana.com"
+            )
         return SolanaAdapter(rpc_url=rpc_url or default_rpc)
     
     # ============================================================

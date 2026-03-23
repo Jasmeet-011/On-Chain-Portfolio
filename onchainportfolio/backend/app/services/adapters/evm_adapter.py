@@ -17,7 +17,7 @@ except ImportError:
     WEB3_AVAILABLE = False
     print("[WARNING] web3 not installed. Run: pip install web3")
 
-from .base_chain_adapter import BaseChainAdapter
+from .base import ChainAdapter as BaseChainAdapter
 
 
 # ============================================================

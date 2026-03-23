@@ -6,6 +6,7 @@ import CreateAlertModal from "../components/CreateAlertModal";
 import {
   RefreshCw, Bell, Plus, TrendingUp, TrendingDown,
   Shuffle, DollarSign, ChevronRight, Mail, Calendar, Sparkles,
+  Send, CheckCircle2, Copy, Link2Off,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "../api";
@@ -113,8 +114,8 @@ const NotificationPrefs: React.FC<{ isDark: boolean }> = ({ isDark }) => {
   ];
 
   return (
-    <div className={`rounded-2xl border p-5 ${
-      isDark ? "bg-zinc-900 border-zinc-700/60" : "bg-white border-gray-200 shadow-sm"
+    <div className={`rounded-xl border p-5 ${
+      isDark ? "bg-zinc-900 border-zinc-800/80" : "bg-white border-gray-200 shadow-sm"
     }`}>
       <div className="flex items-center gap-2 mb-4">
         <Mail className={`w-4 h-4 ${isDark ? "text-zinc-400" : "text-gray-500"}`} />
@@ -148,6 +149,152 @@ const NotificationPrefs: React.FC<{ isDark: boolean }> = ({ isDark }) => {
           </div>
         ))}
       </div>
+    </div>
+  );
+};
+
+// ── Telegram Connect card ─────────────────────────────────────────────────────
+const TelegramConnect: React.FC<{ isDark: boolean }> = ({ isDark }) => {
+  const [status, setStatus]   = useState<"idle" | "loading" | "linked" | "unlinked">("idle");
+  const [code, setCode]       = useState<string | null>(null);
+  const [copied, setCopied]   = useState(false);
+  const [working, setWorking] = useState(false);
+
+  useEffect(() => {
+    api.getTelegramStatus()
+      .then(d => setStatus(d.linked ? "linked" : "unlinked"))
+      .catch(() => setStatus("unlinked"));
+  }, []);
+
+  const handleGenerate = async () => {
+    setWorking(true);
+    try {
+      const d = await api.generateTelegramLink();
+      setCode(d.code);
+    } catch {
+      toast.error("Failed to generate code");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleCopy = () => {
+    if (!code) return;
+    navigator.clipboard.writeText(`/link ${code}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleUnlink = async () => {
+    setWorking(true);
+    try {
+      await api.unlinkTelegram();
+      setStatus("unlinked");
+      setCode(null);
+      toast.success("Telegram unlinked");
+    } catch {
+      toast.error("Failed to unlink");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const panel = `rounded-xl border p-5 ${
+    isDark ? "bg-zinc-900 border-zinc-800/80" : "bg-white border-gray-200 shadow-sm"
+  }`;
+
+  return (
+    <div className={panel}>
+      <div className="flex items-center gap-2 mb-4">
+        <Send className={`w-4 h-4 ${isDark ? "text-zinc-400" : "text-gray-500"}`} />
+        <h3 className={`text-sm font-semibold ${isDark ? "text-zinc-200" : "text-gray-800"}`}>
+          Telegram Bot
+        </h3>
+        {status === "linked" && (
+          <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            Connected
+          </span>
+        )}
+      </div>
+
+      {status === "idle" && (
+        <div className={`text-xs ${isDark ? "text-zinc-500" : "text-gray-400"}`}>Checking…</div>
+      )}
+
+      {status === "linked" && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <p className={`text-xs ${isDark ? "text-zinc-400" : "text-gray-600"}`}>
+              Your Telegram account is linked. Use <span className="font-mono">/portfolio</span> in the bot to check balances anytime.
+            </p>
+          </div>
+          <button
+            onClick={handleUnlink}
+            disabled={working}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+              isDark
+                ? "border-red-500/30 text-red-400 hover:bg-red-500/10"
+                : "border-red-200 text-red-500 hover:bg-red-50"
+            }`}
+          >
+            <Link2Off className="w-3.5 h-3.5" />
+            Unlink Telegram
+          </button>
+        </div>
+      )}
+
+      {status === "unlinked" && !code && (
+        <div className="space-y-3">
+          <p className={`text-xs ${isDark ? "text-zinc-400" : "text-gray-600"}`}>
+            Connect your Telegram account to check your portfolio via bot commands like <span className="font-mono">/portfolio</span> and <span className="font-mono">/price SOL</span>.
+          </p>
+          <button
+            onClick={handleGenerate}
+            disabled={working}
+            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-500 transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <Send className="w-3.5 h-3.5" />
+            {working ? "Generating…" : "Generate Link Code"}
+          </button>
+        </div>
+      )}
+
+      {status === "unlinked" && code && (
+        <div className="space-y-3">
+          <p className={`text-xs ${isDark ? "text-zinc-400" : "text-gray-600"}`}>
+            Send this command to the ChainLens bot in Telegram:
+          </p>
+          <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border font-mono text-sm ${
+            isDark ? "bg-zinc-800 border-zinc-700 text-zinc-200" : "bg-gray-50 border-gray-200 text-gray-800"
+          }`}>
+            <span className="flex-1">/link {code}</span>
+            <button
+              onClick={handleCopy}
+              title="Copy command"
+              className={`shrink-0 transition-colors ${
+                isDark ? "text-zinc-400 hover:text-white" : "text-gray-400 hover:text-gray-700"
+              }`}
+            >
+              {copied
+                ? <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                : <Copy className="w-4 h-4" />}
+            </button>
+          </div>
+          <p className={`text-[11px] ${isDark ? "text-zinc-600" : "text-gray-400"}`}>
+            Code expires in 15 minutes. After linking, use /portfolio, /balance, /price, and /alerts in Telegram.
+          </p>
+          <button
+            onClick={handleGenerate}
+            disabled={working}
+            className={`text-xs underline transition-colors disabled:opacity-50 ${
+              isDark ? "text-zinc-500 hover:text-zinc-300" : "text-gray-400 hover:text-gray-600"
+            }`}
+          >
+            Generate new code
+          </button>
+        </div>
+      )}
     </div>
   );
 };
@@ -275,16 +422,15 @@ const AlertsPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
 
       {/* ── Page header ──────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className={`text-2xl font-bold flex items-center gap-2 ${isDark ? "text-white" : "text-gray-900"}`}>
-            <Bell className="w-6 h-6" />
+          <h2 className={`text-xl font-bold ${isDark ? "text-white" : "text-gray-900"}`}>
             Price Alerts
           </h2>
-          <p className={`text-sm mt-1 ${isDark ? "text-zinc-400" : "text-gray-600"}`}>
+          <p className={`text-sm mt-0.5 ${isDark ? "text-zinc-400" : "text-gray-500"}`}>
             Real-time email notifications when your price targets are reached
           </p>
         </div>
@@ -294,39 +440,39 @@ const AlertsPage: React.FC = () => {
             onClick={() => loadAlerts(true)}
             disabled={loading}
             title="Refresh"
-            className={`p-2.5 rounded-xl transition-colors border disabled:opacity-50 ${
+            className={`p-2 rounded-lg transition-colors border disabled:opacity-50 ${
               isDark ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border-zinc-700"
-                     : "bg-white text-gray-700 hover:bg-gray-50 border-gray-200"
+                     : "bg-white text-gray-600 hover:bg-gray-50 border-gray-200"
             }`}
           >
-            <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </button>
 
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-500 transition-colors flex items-center gap-2 shadow-lg shadow-blue-500/20"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-500 transition-colors flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
-            <span>New Alert</span>
+            New Alert
           </button>
         </div>
       </div>
 
       {/* ── Two-column: suggestions + notification prefs ─────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
         {/* Suggestions (left, 2/3 width) */}
         <div className="lg:col-span-2 space-y-3">
-          <h3 className={`text-xs font-semibold uppercase tracking-widest flex items-center gap-2 ${
+          <p className={`text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
             isDark ? "text-zinc-500" : "text-gray-400"
           }`}>
             <Sparkles className="w-3.5 h-3.5" />
             Portfolio Suggestions
-          </h3>
+          </p>
 
           {suggestLoading ? (
-            <div className={`rounded-2xl p-5 border flex items-center gap-3 ${
-              isDark ? "bg-zinc-900 border-zinc-700/60" : "bg-white border-gray-200"
+            <div className={`rounded-xl p-5 border flex items-center gap-3 ${
+              isDark ? "bg-zinc-900 border-zinc-800/80" : "bg-white border-gray-200"
             }`}>
               <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
               <span className={`text-sm ${isDark ? "text-zinc-400" : "text-gray-500"}`}>
@@ -334,8 +480,8 @@ const AlertsPage: React.FC = () => {
               </span>
             </div>
           ) : suggestions.length === 0 ? (
-            <div className={`rounded-2xl p-5 border text-center ${
-              isDark ? "bg-zinc-900 border-zinc-700/60" : "bg-white border-gray-200"
+            <div className={`rounded-xl p-5 border text-center ${
+              isDark ? "bg-zinc-900 border-zinc-800/80" : "bg-white border-gray-200"
             }`}>
               <Sparkles className={`w-8 h-8 mx-auto mb-2 ${isDark ? "text-zinc-700" : "text-gray-300"}`} />
               <p className={`text-sm ${isDark ? "text-zinc-500" : "text-gray-400"}`}>
@@ -347,9 +493,9 @@ const AlertsPage: React.FC = () => {
               {suggestions.map((s, i) => (
                 <div
                   key={i}
-                  className={`rounded-2xl border p-4 transition-all duration-200 ${
+                  className={`rounded-xl border p-4 transition-all duration-200 ${
                     isDark
-                      ? "bg-zinc-900 border-zinc-700/60 hover:border-zinc-600"
+                      ? "bg-zinc-900 border-zinc-800/80 hover:border-zinc-600"
                       : "bg-white border-gray-200 hover:border-gray-300 shadow-sm"
                   }`}
                 >
@@ -383,20 +529,21 @@ const AlertsPage: React.FC = () => {
           )}
         </div>
 
-        {/* Notification prefs (right, 1/3 width) */}
-        <div className="lg:col-span-1">
-          <h3 className={`text-xs font-semibold uppercase tracking-widest flex items-center gap-2 mb-3 ${
+        {/* Notification prefs + Telegram (right, 1/3 width) */}
+        <div className="lg:col-span-1 space-y-4">
+          <p className={`text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 ${
             isDark ? "text-zinc-500" : "text-gray-400"
           }`}>
             <Bell className="w-3.5 h-3.5" />
             Notifications
-          </h3>
+          </p>
           <NotificationPrefs isDark={isDark} />
+          <TelegramConnect isDark={isDark} />
         </div>
       </div>
 
       {/* ── Filter tabs ──────────────────────────────────────── */}
-      <div className={`flex gap-1 border-b ${isDark ? "border-zinc-700/60" : "border-gray-200"}`}>
+      <div className={`flex gap-1 border-b ${isDark ? "border-zinc-800/80" : "border-gray-200"}`}>
         {(["all", "active", "paused", "triggered"] as AlertFilter[]).map(tab => (
           <button
             key={tab}
@@ -426,8 +573,8 @@ const AlertsPage: React.FC = () => {
 
       {/* ── Loading ──────────────────────────────────────────── */}
       {loading && alerts.length === 0 && (
-        <div className={`rounded-2xl p-12 text-center border ${
-          isDark ? "bg-zinc-900 border-zinc-700/60" : "bg-white border-gray-200"
+        <div className={`rounded-xl p-12 text-center border ${
+          isDark ? "bg-zinc-900 border-zinc-800/80" : "bg-white border-gray-200"
         }`}>
           <RefreshCw className={`w-8 h-8 animate-spin mx-auto mb-3 ${isDark ? "text-zinc-400" : "text-gray-400"}`} />
           <p className={isDark ? "text-zinc-400" : "text-gray-500"}>Loading alerts…</p>
@@ -436,8 +583,8 @@ const AlertsPage: React.FC = () => {
 
       {/* ── Error ────────────────────────────────────────────── */}
       {error && !loading && (
-        <div className={`rounded-2xl p-12 text-center border ${
-          isDark ? "bg-zinc-900 border-zinc-700/60" : "bg-white border-gray-200"
+        <div className={`rounded-xl p-12 text-center border ${
+          isDark ? "bg-zinc-900 border-zinc-800/80" : "bg-white border-gray-200"
         }`}>
           <Bell className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h3 className={`text-xl font-bold mb-2 ${isDark ? "text-white" : "text-gray-900"}`}>Error Loading Alerts</h3>
@@ -465,8 +612,8 @@ const AlertsPage: React.FC = () => {
 
       {/* ── Empty state ──────────────────────────────────────── */}
       {!loading && !error && filteredAlerts.length === 0 && (
-        <div className={`rounded-2xl p-16 text-center border ${
-          isDark ? "bg-zinc-900 border-zinc-700/60" : "bg-white border-gray-200"
+        <div className={`rounded-xl p-16 text-center border ${
+          isDark ? "bg-zinc-900 border-zinc-800/80" : "bg-white border-gray-200"
         }`}>
           <Bell className={`w-14 h-14 mx-auto mb-4 ${isDark ? "text-zinc-700" : "text-gray-300"}`} />
           <h3 className={`text-xl font-bold mb-2 ${isDark ? "text-white" : "text-gray-900"}`}>

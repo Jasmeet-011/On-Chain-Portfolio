@@ -2,7 +2,7 @@
 """
 Alert API Endpoints - Token Price Alerts with improved error handling
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from typing import List
 from pydantic import ValidationError
 import logging
@@ -18,6 +18,7 @@ from app.models.alert_models import (
 )
 from app.deps import get_current_user, get_alert_service, get_email_preferences_service
 from app.services.email_service import EmailService
+from app.limiter import limiter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -401,7 +402,9 @@ async def test_alert(
 # ============================================================
 
 @router.post("/check-now", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
 async def check_alerts_now(
+    request: Request,
     current_user: dict = Depends(get_current_user),
     alert_service = Depends(get_alert_service)
 ):

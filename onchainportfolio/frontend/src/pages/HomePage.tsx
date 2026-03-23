@@ -1,11 +1,12 @@
-// src/pages/HomePage.tsx - Portfolio Home Page (Wallet Group Support)
 import React, { useEffect, useState } from "react";
 import { useAppContext } from "../context/AppContext";
 import { api } from "../api";
 import SummaryCards from "../components/SummaryCards";
 import BalancesTable from "../components/BalancesTable";
 import NFTGallery from "../components/NFTGallery";
+import { SkeletonSummaryCards } from "../components/ui";
 import { TrendingUp, TrendingDown, Wallet, RefreshCw } from "lucide-react";
+import { getChainColors } from "../utils/tokens";
 import toast from "react-hot-toast";
 
 interface HomePageProps {
@@ -27,8 +28,9 @@ const HomePage: React.FC<HomePageProps> = () => {
   const [nftData, setNftData] = useState<any>(null);
   const [loadingNfts, setLoadingNfts] = useState(false);
 
+  const isDark = theme === "dark";
+
   const loadPortfolio = async (showToast: boolean = false) => {
-    // Use wallet group if available, fall back to single wallet
     if (!activeWalletGroup && !activeWallet) return;
 
     setLoading(true);
@@ -42,13 +44,10 @@ const HomePage: React.FC<HomePageProps> = () => {
       let chainsQueried: string[] = [];
 
       if (activeWalletGroup && activeWalletGroup.wallets.length > 0) {
-        // Build wallet pairs from the group
         const walletPairs = activeWalletGroup.wallets.map(w => ({
           address: w.address,
           chain: w.chain,
         }));
-
-        console.log("[HomePage] Loading group portfolio for:", activeWalletGroup.label, walletPairs);
 
         const groupData = await api.getGroupPortfolio(walletPairs, true);
 
@@ -61,7 +60,6 @@ const HomePage: React.FC<HomePageProps> = () => {
         chainsQueried = groupData.chains_queried || [];
 
       } else if (activeWallet) {
-        // Fallback: single wallet (backward compatibility)
         if (activeWallet.chain === 'evm') {
           const multiChainData = await api.getMultiChainPortfolio(activeWallet.address, true);
           balancesWithWallet = multiChainData.all_balances.map((bal: any) => ({
@@ -86,9 +84,9 @@ const HomePage: React.FC<HomePageProps> = () => {
         return;
       }
 
-      const displayLabel = activeWalletGroup?.label || activeWallet?.label || "Unknown";
+      const displayLabel   = activeWalletGroup?.label || activeWallet?.label || "Unknown";
       const displayAddress = activeWallet?.address || activeWalletGroup?.wallets[0]?.address || "";
-      const displayChain = activeWallet?.chain || activeWalletGroup?.chains[0] || "unknown";
+      const displayChain   = activeWallet?.chain  || activeWalletGroup?.chains[0] || "unknown";
 
       setPortfolioData({
         balances: balancesWithWallet,
@@ -99,7 +97,6 @@ const HomePage: React.FC<HomePageProps> = () => {
         chains_queried: chainsQueried,
       });
 
-      // Load recent transactions from the first wallet in the group
       try {
         const txWallet = activeWalletGroup?.wallets[0] || activeWallet;
         if (txWallet) {
@@ -111,25 +108,18 @@ const HomePage: React.FC<HomePageProps> = () => {
         console.error("Failed to load transactions:", txErr);
       }
 
-      if (toastId) {
-        toast.success("Portfolio refreshed!", { id: toastId });
-      }
+      if (toastId) toast.success("Portfolio refreshed!", { id: toastId });
 
     } catch (error: any) {
       console.error("Failed to load portfolio:", error);
       setError("Failed to load portfolio data");
-
-      if (toastId) {
-        toast.error("Failed to refresh portfolio", { id: toastId });
-      }
+      if (toastId) toast.error("Failed to refresh portfolio", { id: toastId });
     } finally {
       setLoading(false);
     }
   };
 
-  // Fetch NFTs for active wallet group (non-EVM wallets only)
   const fetchNFTs = async (showToast: boolean = false) => {
-    // Find a non-EVM wallet in the group to fetch NFTs for
     const nftWallet = activeWalletGroup?.wallets.find(w => w.chain !== 'evm') || activeWallet;
     if (!nftWallet || nftWallet.chain === 'evm') {
       setNftData(null);
@@ -137,7 +127,6 @@ const HomePage: React.FC<HomePageProps> = () => {
     }
 
     setLoadingNfts(true);
-
     const toastId = showToast ? toast.loading("Loading NFTs...") : null;
 
     try {
@@ -150,29 +139,23 @@ const HomePage: React.FC<HomePageProps> = () => {
         total_collections: data.collections?.length || 0,
       });
 
-      if (toastId && data.total_count > 0) {
-        toast.success(`Found ${data.total_count} NFTs!`, { id: toastId });
-      } else if (toastId) {
-        toast.success("NFTs loaded", { id: toastId });
+      if (toastId) {
+        toast.success(data.total_count > 0 ? `Found ${data.total_count} NFTs!` : "NFTs loaded", { id: toastId });
       }
     } catch (err) {
       console.error("Failed to fetch NFTs:", err);
       setNftData(null);
-      if (toastId) {
-        toast.error("Failed to load NFTs", { id: toastId });
-      }
+      if (toastId) toast.error("Failed to load NFTs", { id: toastId });
     } finally {
       setLoadingNfts(false);
     }
   };
 
-  // Reload when active wallet group changes
   useEffect(() => {
     if (activeWalletGroup && activeWalletGroup.wallets.length > 0) {
       loadPortfolio();
       fetchNFTs();
     } else if (activeWallet) {
-      // Fallback for legacy single wallet
       loadPortfolio();
       fetchNFTs();
     } else {
@@ -183,165 +166,93 @@ const HomePage: React.FC<HomePageProps> = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWalletGroup?.id, activeWallet?.address]);
 
-  // Loading state
-  if (loading && !portfolioData) {
-    return (
-      <div className={`rounded-xl p-12 text-center ${
-        theme === "dark" ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-gray-200"
-      }`}>
-        <div className="flex justify-center mb-4">
-          <RefreshCw className={`w-8 h-8 animate-spin ${theme === "dark" ? "text-white" : "text-black"}`} />
-        </div>
-        <p className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
-          Loading portfolio...
-        </p>
-      </div>
-    );
-  }
+  const getChainDisplayName = (chain: string) => {
+    if (chain === 'evm') return 'Multi-Chain';
+    return chain.charAt(0).toUpperCase() + chain.slice(1).replace('_', ' ');
+  };
 
   // No wallet connected
   if (!activeWalletGroup && !activeWallet) {
     return (
-      <div className={`rounded-xl p-16 text-center ${
-        theme === "dark" ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-gray-200"
+      <div className={`rounded-xl py-20 text-center border ${
+        isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-gray-200"
       }`}>
-        <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-6 ${
-          theme === "dark" ? "bg-blue-500/10" : "bg-blue-50"
+        <div className={`inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5 ${
+          isDark ? "bg-blue-500/10 border border-blue-500/20" : "bg-blue-50 border border-blue-100"
         }`}>
-          <Wallet className="w-8 h-8 text-blue-500" />
+          <Wallet className="w-7 h-7 text-blue-500" />
         </div>
-        <h3 className={`text-2xl font-bold mb-3 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+        <p className={`text-base font-semibold mb-1.5 ${isDark ? "text-white" : "text-gray-900"}`}>
           Connect Your Wallet
-        </h3>
-        <p className={theme === "dark" ? "text-zinc-400" : "text-gray-600"}>
+        </p>
+        <p className={`text-sm ${isDark ? "text-zinc-400" : "text-gray-500"}`}>
           Click "Connect Wallet" in the header to get started
         </p>
       </div>
     );
   }
 
-  // Get chain emoji
-  const getChainEmoji = (chain: string) => {
-    const emojis: Record<string, string> = {
-      aptos: '⬢',
-      solana: '◎',
-      ethereum: 'Ξ',
-      ethereum_sepolia: 'Ξ',
-      polygon: '⬡',
-      polygon_amoy: '⬡',
-      base: '🔵',
-      base_sepolia: '🔵',
-      evm: '🔗', // Multi-chain EVM
-    };
-    return emojis[chain] || '⬢';
-  };
+  // Loading initial data
+  if (loading && !portfolioData) {
+    return (
+      <div className="space-y-6">
+        <SkeletonSummaryCards />
+        <div className={`rounded-xl p-8 text-center border ${isDark ? "bg-zinc-900 border-zinc-800" : "bg-white border-gray-200"}`}>
+          <div className="flex items-center justify-center gap-2">
+            <RefreshCw className={`w-5 h-5 animate-spin ${isDark ? "text-zinc-400" : "text-gray-400"}`} />
+            <span className={`text-sm ${isDark ? "text-zinc-400" : "text-gray-500"}`}>Loading portfolio…</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  // Get chain display name
-  const getChainDisplayName = (chain: string) => {
-    if (chain === 'evm') return 'Multi-Chain';
-    return chain.charAt(0).toUpperCase() + chain.slice(1).replace('_', ' ');
-  };
-
-  // Get chain badge style
-  const getChainBadgeStyle = (chain: string) => {
-    const styles: Record<string, { dark: string; light: string }> = {
-      aptos: {
-        dark: "bg-blue-500/10 text-blue-400 border border-blue-500/20",
-        light: "bg-blue-50 text-blue-600 border border-blue-200"
-      },
-      solana: {
-        dark: "bg-purple-500/10 text-purple-400 border border-purple-500/20",
-        light: "bg-purple-50 text-purple-600 border border-purple-200"
-      },
-      ethereum: {
-        dark: "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20",
-        light: "bg-gray-50 text-gray-600 border border-gray-200"
-      },
-      ethereum_sepolia: {
-        dark: "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20",
-        light: "bg-gray-50 text-gray-600 border border-gray-200"
-      },
-      polygon: {
-        dark: "bg-violet-500/10 text-violet-400 border border-violet-500/20",
-        light: "bg-violet-50 text-violet-600 border border-violet-200"
-      },
-      polygon_amoy: {
-        dark: "bg-violet-500/10 text-violet-400 border border-violet-500/20",
-        light: "bg-violet-50 text-violet-600 border border-violet-200"
-      },
-      base: {
-        dark: "bg-blue-600/10 text-blue-500 border border-blue-600/20",
-        light: "bg-blue-50 text-blue-600 border border-blue-200"
-      },
-      base_sepolia: {
-        dark: "bg-blue-600/10 text-blue-500 border border-blue-600/20",
-        light: "bg-blue-50 text-blue-600 border border-blue-200"
-      },
-      evm: {
-        dark: "bg-gradient-to-r from-blue-500/10 to-purple-500/10 text-blue-400 border border-blue-500/20",
-        light: "bg-gradient-to-r from-blue-50 to-purple-50 text-blue-600 border border-blue-200"
-      },
-    };
-    const style = styles[chain] || styles.aptos;
-    return theme === "dark" ? style.dark : style.light;
-  };
-
-  // Get top movers
-  const topGainer = portfolioData?.balances?.sort((a: any, b: any) =>
+  const topGainer = portfolioData?.balances?.slice().sort((a: any, b: any) =>
     (b.price_change_24h || 0) - (a.price_change_24h || 0)
   )[0];
 
-  const topLoser = portfolioData?.balances?.sort((a: any, b: any) =>
+  const topLoser = portfolioData?.balances?.slice().sort((a: any, b: any) =>
     (a.price_change_24h || 0) - (b.price_change_24h || 0)
   )[0];
 
+  const sectionClass = `rounded-xl overflow-hidden border ${
+    isDark ? "bg-zinc-900 border-zinc-800/80" : "bg-white border-gray-200 shadow-sm"
+  }`;
+  const sectionHeaderClass = `px-5 py-4 border-b ${isDark ? "border-zinc-800/80" : "border-gray-200"}`;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
+    <div className="space-y-5">
+      {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className={`text-2xl font-bold flex items-center gap-2 ${
-            theme === "dark" ? "text-white" : "text-gray-900"
-          }`}>
+          <h2 className={`text-xl font-bold ${isDark ? "text-white" : "text-gray-900"}`}>
             Portfolio Overview
-            {activeWalletGroup ? (
-              <span className="text-lg">{activeWalletGroup.icon}</span>
-            ) : activeWallet ? (
-              <span className="text-lg">{getChainEmoji(activeWallet.chain)}</span>
-            ) : null}
           </h2>
-          <p className={`text-sm mt-1 flex items-center gap-2 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
-            <span className="font-medium text-blue-500">
+          <div className={`flex items-center gap-2 mt-1 text-sm ${isDark ? "text-zinc-400" : "text-gray-500"}`}>
+            <span className="font-medium text-blue-400">
               {activeWalletGroup?.label || activeWallet?.label || "Unknown"}
             </span>
-            {activeWalletGroup ? (
-              <span className="flex items-center gap-1">
-                {activeWalletGroup.chains.map((chain) => (
-                  <span
-                    key={chain}
-                    className={`px-2 py-0.5 rounded text-xs font-medium ${getChainBadgeStyle(chain)}`}
-                  >
-                    {getChainDisplayName(chain)}
-                  </span>
-                ))}
-              </span>
-            ) : activeWallet ? (
-              <span className={`px-2 py-0.5 rounded text-xs font-medium ${getChainBadgeStyle(activeWallet.chain)}`}>
-                {getChainDisplayName(activeWallet.chain)}
-              </span>
-            ) : null}
-          </p>
+            {(activeWalletGroup?.chains || (activeWallet ? [activeWallet.chain] : [])).map((chain) => {
+              const c = getChainColors(chain);
+              return (
+                <span key={chain} className={`px-2 py-0.5 rounded-md text-xs font-medium border ${c.bg} ${c.text} ${c.border}`}>
+                  {getChainDisplayName(chain)}
+                </span>
+              );
+            })}
+          </div>
         </div>
+
         <button
           onClick={() => loadPortfolio(true)}
           disabled={loading}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-            theme === "dark"
-              ? "bg-zinc-900 text-zinc-300 hover:bg-zinc-800 border border-zinc-800"
+          className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 ${
+            isDark
+              ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700"
               : "bg-white text-gray-700 hover:bg-gray-50 border border-gray-200"
-          } disabled:opacity-50`}
+          }`}
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           Refresh
         </button>
       </div>
@@ -349,73 +260,63 @@ const HomePage: React.FC<HomePageProps> = () => {
       {/* Summary Cards */}
       <SummaryCards data={portfolioData} />
 
-      {/* Top Movers & Recent Activity Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Top Movers + Recent Activity */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Top Movers */}
-        <div className={`rounded-xl p-6 ${
-          theme === "dark" ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-gray-200 shadow-sm"
-        }`}>
-          <h3 className={`text-lg font-bold mb-4 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-            24h Movers
-          </h3>
-          <div className="space-y-3">
+        <div className={sectionClass}>
+          <div className={sectionHeaderClass}>
+            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>24h Movers</p>
+          </div>
+          <div className="p-5 space-y-3">
             {topGainer && topGainer.price_change_24h > 0 && (
-              <div className={`p-3 rounded-lg ${
-                theme === "dark" ? "bg-green-500/5" : "bg-green-50"
-              }`}>
+              <div className={`p-3 rounded-lg ${isDark ? "bg-emerald-500/5 border border-emerald-500/10" : "bg-emerald-50 border border-emerald-100"}`}>
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4 text-green-500" />
-                      <span className={`font-medium ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                      <TrendingUp className="w-4 h-4 text-emerald-500" />
+                      <span className={`text-sm font-medium ${isDark ? "text-white" : "text-gray-900"}`}>
                         {topGainer.symbol}
                       </span>
                     </div>
-                    <p className={`text-xs mt-1 ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
-                      Top Gainer
-                    </p>
+                    <p className={`text-xs mt-0.5 ${isDark ? "text-zinc-500" : "text-gray-400"}`}>Top Gainer</p>
                   </div>
                   <div className="text-right">
-                    <div className="text-green-500 font-semibold">
+                    <p className="text-sm font-semibold text-emerald-500 font-numeric">
                       +{topGainer.price_change_24h.toFixed(2)}%
-                    </div>
-                    <div className={`text-xs ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
+                    </p>
+                    <p className={`text-xs font-numeric ${isDark ? "text-zinc-500" : "text-gray-400"}`}>
                       ${topGainer.usd_value?.toFixed(2)}
-                    </div>
+                    </p>
                   </div>
                 </div>
               </div>
             )}
             {topLoser && topLoser.price_change_24h < 0 && (
-              <div className={`p-3 rounded-lg ${
-                theme === "dark" ? "bg-red-500/5" : "bg-red-50"
-              }`}>
+              <div className={`p-3 rounded-lg ${isDark ? "bg-red-500/5 border border-red-500/10" : "bg-red-50 border border-red-100"}`}>
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-2">
                       <TrendingDown className="w-4 h-4 text-red-500" />
-                      <span className={`font-medium ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                      <span className={`text-sm font-medium ${isDark ? "text-white" : "text-gray-900"}`}>
                         {topLoser.symbol}
                       </span>
                     </div>
-                    <p className={`text-xs mt-1 ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
-                      Top Loser
-                    </p>
+                    <p className={`text-xs mt-0.5 ${isDark ? "text-zinc-500" : "text-gray-400"}`}>Top Loser</p>
                   </div>
                   <div className="text-right">
-                    <div className="text-red-500 font-semibold">
+                    <p className="text-sm font-semibold text-red-500 font-numeric">
                       {topLoser.price_change_24h.toFixed(2)}%
-                    </div>
-                    <div className={`text-xs ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
+                    </p>
+                    <p className={`text-xs font-numeric ${isDark ? "text-zinc-500" : "text-gray-400"}`}>
                       ${topLoser.usd_value?.toFixed(2)}
-                    </div>
+                    </p>
                   </div>
                 </div>
               </div>
             )}
             {(!topGainer?.price_change_24h || topGainer.price_change_24h <= 0) &&
-             (!topLoser?.price_change_24h || topLoser.price_change_24h >= 0) && (
-              <p className={`text-sm text-center py-4 ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
+             (!topLoser?.price_change_24h  || topLoser.price_change_24h  >= 0) && (
+              <p className={`text-sm text-center py-4 ${isDark ? "text-zinc-500" : "text-gray-400"}`}>
                 No price changes in the last 24h
               </p>
             )}
@@ -423,79 +324,62 @@ const HomePage: React.FC<HomePageProps> = () => {
         </div>
 
         {/* Recent Activity */}
-        <div className={`rounded-xl p-6 ${
-          theme === "dark" ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-gray-200 shadow-sm"
-        }`}>
-          <h3 className={`text-lg font-bold mb-4 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-            Recent Activity
-          </h3>
-          {recentTxs.length > 0 ? (
-            <div className="space-y-2">
-              {recentTxs.map((tx: any, idx: number) => (
-                <div key={idx} className={`p-2 rounded text-sm ${
-                  theme === "dark" ? "hover:bg-zinc-800" : "hover:bg-gray-50"
-                } transition-colors cursor-pointer`}>
-                  <div className="flex items-center justify-between">
-                    <span className={theme === "dark" ? "text-zinc-300" : "text-gray-700"}>
-                      {tx.type}
-                    </span>
-                    <span className={`text-xs ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
-                      {new Date(tx.timestamp).toLocaleDateString()}
-                    </span>
+        <div className={sectionClass}>
+          <div className={sectionHeaderClass}>
+            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>Recent Activity</p>
+          </div>
+          <div className="p-5">
+            {recentTxs.length > 0 ? (
+              <div className="space-y-1">
+                {recentTxs.map((tx: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className={`px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                      isDark ? "hover:bg-zinc-800/60" : "hover:bg-gray-50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={isDark ? "text-zinc-300" : "text-gray-700"}>{tx.type}</span>
+                      <span className={`text-xs ${isDark ? "text-zinc-500" : "text-gray-400"}`}>
+                        {new Date(tx.timestamp).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className={`text-sm ${theme === "dark" ? "text-zinc-500" : "text-gray-500"}`}>
-              No recent activity
-            </p>
-          )}
+                ))}
+              </div>
+            ) : (
+              <p className={`text-sm text-center py-4 ${isDark ? "text-zinc-500" : "text-gray-400"}`}>
+                No recent activity
+              </p>
+            )}
+          </div>
         </div>
       </div>
 
-
-      {/* NFT Collection Section */}
+      {/* NFT Collection */}
       {nftData && nftData.total_nfts > 0 && (
-        <div className={`rounded-xl overflow-hidden ${
-          theme === "dark" ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-gray-200 shadow-sm"
-        }`}>
-          <div className={`px-6 py-4 border-b ${
-            theme === "dark" ? "border-zinc-800" : "border-gray-200"
-          }`}>
+        <div className={sectionClass}>
+          <div className={sectionHeaderClass}>
             <div className="flex items-center justify-between">
               <div>
-                <h3 className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                  NFT Collection
-                </h3>
-                <p className={`text-sm mt-0.5 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
-                  Digital collectibles in this wallet
+                <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>NFT Collection</p>
+                <p className={`text-xs mt-0.5 ${isDark ? "text-zinc-400" : "text-gray-500"}`}>
+                  {nftData.total_nfts} NFT{nftData.total_nfts !== 1 ? "s" : ""} · {nftData.total_collections} collection{nftData.total_collections !== 1 ? "s" : ""}
                 </p>
               </div>
               <button
                 onClick={() => fetchNFTs(true)}
                 disabled={loadingNfts}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-2 ${
-                  theme === "dark"
-                    ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                } disabled:opacity-50`}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50 ${
+                  isDark ? "bg-zinc-800 text-zinc-300 hover:bg-zinc-700" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
               >
-                {loadingNfts ? (
-                  <>
-                    <RefreshCw className="w-3 h-3 animate-spin" />
-                    Loading...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="w-3 h-3" />
-                    Refresh
-                  </>
-                )}
+                <RefreshCw className={`w-3 h-3 ${loadingNfts ? "animate-spin" : ""}`} />
+                {loadingNfts ? "Loading…" : "Refresh"}
               </button>
             </div>
           </div>
-          <div className="p-6">
+          <div className="p-5">
             <NFTGallery
               nfts={nftData.all_nfts}
               collections={nftData.collections}
@@ -509,24 +393,14 @@ const HomePage: React.FC<HomePageProps> = () => {
 
       {/* Token Balances */}
       {portfolioData?.balances && portfolioData.balances.length > 0 && (
-        <div className={`rounded-xl overflow-hidden ${
-          theme === "dark" ? "bg-zinc-900 border border-zinc-800" : "bg-white border border-gray-200 shadow-sm"
-        }`}>
-          <div className={`px-6 py-4 border-b ${
-            theme === "dark" ? "border-zinc-800" : "border-gray-200"
-          }`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className={`text-lg font-bold ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                  Token Balances
-                </h3>
-                <p className={`text-sm mt-0.5 ${theme === "dark" ? "text-zinc-400" : "text-gray-600"}`}>
-                  {activeWalletGroup && activeWalletGroup.chains.length > 1
-                    ? `Your holdings across ${activeWalletGroup.chains.map(c => getChainDisplayName(c)).join(', ')}`
-                    : `Your holdings on ${getChainDisplayName(activeWallet?.chain || activeWalletGroup?.chains[0] || 'unknown')}`}
-                </p>
-              </div>
-            </div>
+        <div className={sectionClass}>
+          <div className={sectionHeaderClass}>
+            <p className={`text-sm font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>Token Balances</p>
+            <p className={`text-xs mt-0.5 ${isDark ? "text-zinc-400" : "text-gray-500"}`}>
+              {activeWalletGroup && activeWalletGroup.chains.length > 1
+                ? `Holdings across ${activeWalletGroup.chains.map(c => getChainDisplayName(c)).join(", ")}`
+                : `Holdings on ${getChainDisplayName(activeWallet?.chain || activeWalletGroup?.chains[0] || "unknown")}`}
+            </p>
           </div>
           <BalancesTable balances={portfolioData.balances} showWalletColumn={false} />
         </div>

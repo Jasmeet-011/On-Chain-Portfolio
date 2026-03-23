@@ -42,7 +42,8 @@ async def get_wallet_nfts(
     # Verify wallet belongs to user
     wallet = wallets_collection.find_one({
         "user_id": user_id,
-        "address": wallet_address
+        "address": wallet_address,
+        "is_active": True
     })
     
     if not wallet:
@@ -76,8 +77,8 @@ async def get_all_nfts(
     user_id = str(current_user["_id"])
     
     # Get all user wallets
-    wallets = list(wallets_collection.find({"user_id": user_id}))
-    
+    wallets = list(wallets_collection.find({"user_id": user_id, "is_active": True}))
+
     if not wallets:
         # Return empty response instead of error
         return AggregatedNFTResponse(
@@ -129,8 +130,8 @@ async def get_collections_summary(
     user_id = str(current_user["_id"])
     
     # Get all user wallets
-    wallets = list(wallets_collection.find({"user_id": user_id}))
-    
+    wallets = list(wallets_collection.find({"user_id": user_id, "is_active": True}))
+
     if not wallets:
         return {
             "total_collections": 0,

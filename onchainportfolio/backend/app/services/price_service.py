@@ -1147,6 +1147,18 @@ class PriceService:
 
         return None
 
+    async def get_prices_with_changes_async(
+        self,
+        symbols: List[str]
+    ) -> Dict[str, Dict[str, Optional[float]]]:
+        """
+        Async wrapper around get_prices_with_changes().
+        Returns: {symbol: {"price": float|None, "change_24h": float|None}}
+        Runs the sync CoinGecko call in a thread to avoid blocking the event loop.
+        """
+        import asyncio
+        return await asyncio.to_thread(self.get_prices_with_changes, symbols)
+
 
 # ============================================================
 # Singleton Instance

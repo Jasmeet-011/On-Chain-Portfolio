@@ -1,6 +1,8 @@
 # app/routers/auth.py
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from typing import List
+
+from app.limiter import limiter
 
 from app.schemas.auth import (
     SignUpRequest, 
@@ -79,10 +81,12 @@ def user_to_response(user: dict, user_id: str) -> UserResponse:
 # ============================================================
 
 @router.post("/signup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def signup(payload: SignUpRequest):
+@limiter.limit("5/minute")
+def signup(request: Request, payload: SignUpRequest):
     """
     Create a new user account.
     Sends a verification email; returns user info + JWT token.
+    Rate-limited: 5 requests per minute per IP.
     """
     existing = get_user_by_email(payload.email)
     if existing:
@@ -183,9 +187,11 @@ def resend_verification(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(payload: SignInRequest):
+@limiter.limit("10/minute")
+def login(request: Request, payload: SignInRequest):
     """
     Authenticate user and return user info with JWT access token.
+    Rate-limited: 10 requests per minute per IP.
     """
     user = authenticate_user(payload.email, payload.password)
     if not user:

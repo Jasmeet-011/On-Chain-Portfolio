@@ -3,14 +3,16 @@
 Email Service - Send email notifications for alerts
 Supports: Price Alerts, Daily Digest, Weekly Summary, Milestones
 """
-import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
-from typing import Optional
 import logging
 
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
+
+from app.config import settings
 from app.models.alert_models import (
     PriceAlertEmailData,
     DailyDigestEmailData,
@@ -24,46 +26,52 @@ logger = logging.getLogger(__name__)
 class EmailService:
     """
     Service for sending email notifications.
-    
+
     Supports multiple backends:
     - Console (development) - just logs emails
-    - SMTP (production) - sends real emails
-    - SendGrid (optional) - for high volume
+    - SendGrid (primary) - uses SendGrid Python SDK if SENDGRID_API_KEY is set
+    - SMTP (fallback) - sends real emails via SMTP if SendGrid is not configured
     """
-    
+
     def __init__(self):
-        # Email configuration from environment
-        self.smtp_host = os.getenv("SMTP_HOST", "")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        self.smtp_user = os.getenv("SMTP_USER", "")
-        self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.from_email = os.getenv("FROM_EMAIL", "alerts@chainlens.app")
-        self.from_name = os.getenv("FROM_NAME", "ChainLens Alerts")
-        
+        # Email configuration from settings (config-based, not raw os.getenv)
+        self.smtp_host = settings.smtp_host
+        self.smtp_port = settings.smtp_port
+        self.smtp_user = settings.smtp_user
+        self.smtp_password = settings.smtp_password
+        self.from_email = settings.from_email
+        self.from_name = settings.from_name
+        self.sendgrid_api_key = settings.sendgrid_api_key
+
+        # Check if SendGrid is configured
+        self.sendgrid_enabled = bool(self.sendgrid_api_key)
+
         # Check if SMTP is configured
         self.smtp_enabled = bool(self.smtp_host and self.smtp_user and self.smtp_password)
-        
-        if self.smtp_enabled:
+
+        if self.sendgrid_enabled:
+            logger.info("[EMAIL] SendGrid configured — will use as primary sender")
+        elif self.smtp_enabled:
             logger.info(f"[EMAIL] SMTP configured: {self.smtp_host}:{self.smtp_port}")
         else:
-            logger.info("[EMAIL] SMTP not configured - emails will be logged to console")
-    
+            logger.info("[EMAIL] No email transport configured — emails will be logged to console")
+
     # ============================================================
     # PRICE ALERT EMAILS
     # ============================================================
-    
+
     def send_price_alert(self, data: PriceAlertEmailData) -> bool:
         """
         Send price alert notification email.
-        
+
         Called when a token price crosses the user's target.
         """
         subject = f"🚨 Price Alert: {data.token_symbol} is now ${data.current_price:.2f}"
-        
+
         # Determine if price went up or down
         direction = "above" if data.alert_type == "above" else "below"
         emoji = "📈" if data.alert_type == "above" else "📉"
-        
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -95,7 +103,7 @@ class EmailService:
                 <div class="content">
                     <p>Hi {data.user_name},</p>
                     <p>Your price alert for <strong>{data.token_symbol}</strong> has been triggered!</p>
-                    
+
                     <div class="price-box">
                         <div class="current-price">${data.current_price:.4f}</div>
                         <div class="target-price">Target: {direction} ${data.target_price:.4f}</div>
@@ -103,7 +111,7 @@ class EmailService:
                             24h Change: {'+' if data.change_percent >= 0 else ''}{data.change_percent:.2f}%
                         </div>
                     </div>
-                    
+
                     <div class="details">
                         <div class="details-row">
                             <span>Token</span>
@@ -122,7 +130,7 @@ class EmailService:
                             <strong>{'Recurring' if data.is_recurring else 'One-time'}</strong>
                         </div>
                     </div>
-                    
+
                     <p style="text-align: center;">
                         <a href="https://chainlens.app/alerts" class="btn">View All Alerts</a>
                     </p>
@@ -135,7 +143,7 @@ class EmailService:
         </body>
         </html>
         """
-        
+
         plain_content = f"""
 Price Alert Triggered!
 
@@ -155,27 +163,27 @@ View all alerts: https://chainlens.app/alerts
 ---
 ChainLens - Your Multi-Chain Portfolio Tracker
         """
-        
+
         return self._send_email(
             to_email=data.user_email,
             subject=subject,
             html_content=html_content,
             plain_content=plain_content
         )
-    
+
     # ============================================================
     # DAILY DIGEST EMAILS
     # ============================================================
-    
+
     def send_daily_digest(self, data: DailyDigestEmailData) -> bool:
         """
         Send daily portfolio digest email.
-        
+
         Called once per day for users who have it enabled.
         """
         change_emoji = "📈" if data.change_percent >= 0 else "📉"
         subject = f"{change_emoji} Daily Digest: Portfolio ${data.portfolio_value:,.2f} ({'+' if data.change_percent >= 0 else ''}{data.change_percent:.2f}%)"
-        
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -207,14 +215,14 @@ ChainLens - Your Multi-Chain Portfolio Tracker
                 <div class="content">
                     <p>Good morning, {data.user_name}!</p>
                     <p>Here's your portfolio summary for the last 24 hours:</p>
-                    
+
                     <div class="value-box">
                         <div class="total-value">${data.portfolio_value:,.2f}</div>
                         <div class="change {'positive' if data.change_percent >= 0 else 'negative'}">
                             {'+' if data.change_24h >= 0 else ''}${data.change_24h:,.2f} ({'+' if data.change_percent >= 0 else ''}{data.change_percent:.2f}%)
                         </div>
                     </div>
-                    
+
                     <div class="movers">
                         <div class="mover">
                             <div class="mover-label">🚀 Top Gainer</div>
@@ -227,7 +235,7 @@ ChainLens - Your Multi-Chain Portfolio Tracker
                             <div class="negative">{data.top_loser.get('change_percent', 0):.2f}%</div>
                         </div>
                     </div>
-                    
+
                     <p style="text-align: center;">
                         <a href="https://chainlens.app" class="btn">View Full Portfolio</a>
                     </p>
@@ -240,7 +248,7 @@ ChainLens - Your Multi-Chain Portfolio Tracker
         </body>
         </html>
         """
-        
+
         plain_content = f"""
 Daily Portfolio Digest - {datetime.now().strftime('%B %d, %Y')}
 
@@ -257,115 +265,164 @@ View portfolio: https://chainlens.app
 ---
 ChainLens - Your Multi-Chain Portfolio Tracker
         """
-        
+
         return self._send_email(
             to_email=data.user_email,
             subject=subject,
             html_content=html_content,
             plain_content=plain_content
         )
-    
+
     # ============================================================
     # WEEKLY SUMMARY EMAILS
     # ============================================================
-    
+
     def send_weekly_summary(self, data: WeeklySummaryEmailData) -> bool:
         """
         Send weekly portfolio summary email.
-        
-        Called once per week (Sunday) for users who have it enabled.
+        Includes: portfolio value, weekly change, performers, and portfolio suggestions.
         """
         change_emoji = "📈" if data.change_percent >= 0 else "📉"
-        subject = f"{change_emoji} Weekly Summary: {'+' if data.change_percent >= 0 else ''}{data.change_percent:.2f}% this week"
-        
+        change_sign = "+" if data.change_percent >= 0 else ""
+        change_color = "#10b981" if data.change_percent >= 0 else "#ef4444"
+        subject = f"{change_emoji} Weekly Portfolio: {change_sign}{data.change_percent:.2f}% | ${data.portfolio_value_end:,.2f}"
+
+        # Build performers HTML
+        performers_html = ""
+        if data.best_performer:
+            performers_html += f"""
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #e4e4e7;">
+                <span style="color:#52525b; font-size:14px;">🏆 Best performer</span>
+                <span style="font-weight:600; color:#10b981;">{data.best_performer['symbol']} {'+' if data.best_performer['change_percent'] >= 0 else ''}{data.best_performer['change_percent']:.2f}%</span>
+            </div>"""
+        if data.worst_performer:
+            performers_html += f"""
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0;">
+                <span style="color:#52525b; font-size:14px;">📉 Worst performer</span>
+                <span style="font-weight:600; color:#ef4444;">{data.worst_performer['symbol']} {'+' if data.worst_performer['change_percent'] >= 0 else ''}{data.worst_performer['change_percent']:.2f}%</span>
+            </div>"""
+
+        # Build suggestions HTML
+        suggestions = data.suggestions or []
+        priority_colors = {"high": "#ef4444", "medium": "#f59e0b", "low": "#10b981"}
+        suggestions_html = ""
+        if suggestions:
+            suggestion_items = ""
+            for s in suggestions[:3]:
+                priority = s.get("priority", "medium")
+                color = priority_colors.get(priority, "#f59e0b")
+                suggestion_items += f"""
+                <div style="padding:12px; background:#fafafa; border-left:3px solid {color}; border-radius:0 6px 6px 0; margin-bottom:10px;">
+                    <div style="font-weight:600; font-size:14px; color:#18181b;">{s.get('title', '')}</div>
+                    <div style="font-size:13px; color:#71717a; margin-top:4px;">{s.get('reason', '')}</div>
+                </div>"""
+            suggestions_html = f"""
+            <div style="margin-top:24px;">
+                <h3 style="font-size:15px; font-weight:600; color:#18181b; margin:0 0 12px;">💡 Portfolio Suggestions</h3>
+                {suggestion_items}
+            </div>"""
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <style>
-                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
-                .container {{ max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; }}
-                .header {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 30px; text-align: center; }}
-                .content {{ padding: 30px; }}
-                .stats {{ display: flex; gap: 15px; margin: 20px 0; }}
-                .stat {{ flex: 1; background: #f8f9fa; border-radius: 8px; padding: 15px; text-align: center; }}
-                .stat-value {{ font-size: 24px; font-weight: bold; }}
-                .stat-label {{ font-size: 12px; color: #666; }}
-                .positive {{ color: #10b981; }}
-                .negative {{ color: #ef4444; }}
-                .btn {{ display: inline-block; background: #3b82f6; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; }}
-                .footer {{ background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 12px; }}
-            </style>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
         </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>📅 Weekly Portfolio Summary</h1>
+        <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#f4f4f5; margin:0; padding:20px;">
+            <div style="max-width:600px; margin:0 auto; background:white; border-radius:12px; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+
+                <!-- Header -->
+                <div style="background:linear-gradient(135deg,#18181b 0%,#27272a 100%); color:white; padding:32px 30px; text-align:center;">
+                    <p style="margin:0 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:1px; opacity:0.5;">Weekly Report</p>
+                    <h1 style="margin:0; font-size:22px; font-weight:700;">Portfolio Summary</h1>
+                    <p style="margin:8px 0 0; opacity:0.5; font-size:13px;">{datetime.now().strftime('%B %d, %Y')}</p>
                 </div>
-                <div class="content">
-                    <p>Hi {data.user_name},</p>
-                    <p>Here's how your portfolio performed this week:</p>
-                    
-                    <div class="stats">
-                        <div class="stat">
-                            <div class="stat-value">${data.portfolio_value_end:,.2f}</div>
-                            <div class="stat-label">Current Value</div>
+
+                <!-- Value Card -->
+                <div style="padding:30px 30px 0;">
+                    <div style="background:#f8f8f9; border-radius:10px; padding:24px; text-align:center; margin-bottom:24px;">
+                        <p style="margin:0 0 4px; font-size:12px; color:#a1a1aa; text-transform:uppercase; letter-spacing:0.5px;">Total Portfolio Value</p>
+                        <p style="margin:0; font-size:36px; font-weight:700; color:#18181b;">${data.portfolio_value_end:,.2f}</p>
+                        <p style="margin:8px 0 0; font-size:16px; font-weight:600; color:{change_color};">
+                            {change_emoji} {change_sign}{data.change_percent:.2f}% this week ({change_sign}${abs(data.change_week):,.2f})
+                        </p>
+                    </div>
+
+                    <!-- Stats Row -->
+                    <div style="display:flex; gap:12px; margin-bottom:24px;">
+                        <div style="flex:1; background:#f8f8f9; border-radius:8px; padding:16px; text-align:center;">
+                            <p style="margin:0 0 4px; font-size:11px; color:#a1a1aa; text-transform:uppercase;">Tokens</p>
+                            <p style="margin:0; font-size:22px; font-weight:700; color:#18181b;">{data.total_tokens}</p>
                         </div>
-                        <div class="stat">
-                            <div class="stat-value {'positive' if data.change_percent >= 0 else 'negative'}">
-                                {'+' if data.change_percent >= 0 else ''}{data.change_percent:.2f}%
-                            </div>
-                            <div class="stat-label">Weekly Change</div>
-                        </div>
-                        <div class="stat">
-                            <div class="stat-value">{data.alerts_triggered}</div>
-                            <div class="stat-label">Alerts Triggered</div>
+                        <div style="flex:1; background:#f8f8f9; border-radius:8px; padding:16px; text-align:center;">
+                            <p style="margin:0 0 4px; font-size:11px; color:#a1a1aa; text-transform:uppercase;">Alerts Fired</p>
+                            <p style="margin:0; font-size:22px; font-weight:700; color:#18181b;">{data.alerts_triggered}</p>
                         </div>
                     </div>
-                    
-                    <p style="text-align: center;">
-                        <a href="https://chainlens.app/analytics" class="btn">View Analytics</a>
-                    </p>
+
+                    <!-- Performers -->
+                    {f'<div style="background:#f8f8f9; border-radius:8px; padding:16px; margin-bottom:24px;">{performers_html}</div>' if performers_html else ''}
+
+                    <!-- Suggestions -->
+                    {suggestions_html}
+
+                    <!-- CTA -->
+                    <div style="text-align:center; margin:28px 0;">
+                        <a href="{settings.app_url}/analytics" style="display:inline-block; background:#18181b; color:white; padding:13px 28px; border-radius:8px; text-decoration:none; font-weight:600; font-size:14px;">View Full Analytics →</a>
+                    </div>
                 </div>
-                <div class="footer">
-                    <p><a href="https://chainlens.app/alerts">Manage email preferences</a></p>
+
+                <!-- Footer -->
+                <div style="background:#f8f8f9; padding:20px 30px; text-align:center; border-top:1px solid #e4e4e7;">
+                    <p style="margin:0; color:#a1a1aa; font-size:12px;">
+                        ChainLens · <a href="{settings.app_url}/alerts" style="color:#71717a;">Manage alerts</a>
+                    </p>
                 </div>
             </div>
         </body>
         </html>
         """
-        
-        plain_content = f"""
-Weekly Portfolio Summary
+
+        # Suggestions plain text
+        suggestions_plain = ""
+        if suggestions:
+            suggestions_plain = "\n\nPortfolio Suggestions:\n"
+            for i, s in enumerate(suggestions[:3], 1):
+                suggestions_plain += f"{i}. {s.get('title', '')} — {s.get('reason', '')}\n"
+
+        plain_content = f"""Weekly Portfolio Summary — {datetime.now().strftime('%B %d, %Y')}
 
 Hi {data.user_name},
 
 Current Value: ${data.portfolio_value_end:,.2f}
-Weekly Change: {'+' if data.change_percent >= 0 else ''}{data.change_percent:.2f}%
-Alerts Triggered: {data.alerts_triggered}
-
-View analytics: https://chainlens.app/analytics
+Weekly Change: {change_sign}{data.change_percent:.2f}% ({change_sign}${abs(data.change_week):,.2f})
+Tokens Held: {data.total_tokens}
+Alerts Fired: {data.alerts_triggered}
+{f"Best Performer: {data.best_performer['symbol']} {'+' if data.best_performer['change_percent'] >= 0 else ''}{data.best_performer['change_percent']:.2f}%" if data.best_performer else ""}
+{f"Worst Performer: {data.worst_performer['symbol']} {'+' if data.worst_performer['change_percent'] >= 0 else ''}{data.worst_performer['change_percent']:.2f}%" if data.worst_performer else ""}
+{suggestions_plain}
+View full analytics: {settings.app_url}/analytics
 
 ---
-ChainLens
+ChainLens · Manage alerts: {settings.app_url}/alerts
         """
-        
+
         return self._send_email(
             to_email=data.user_email,
             subject=subject,
             html_content=html_content,
             plain_content=plain_content
         )
-    
+
     # ============================================================
     # MILESTONE EMAILS
     # ============================================================
-    
+
     def send_milestone_alert(self, data: MilestoneEmailData) -> bool:
         """Send milestone notification email (ATH, etc.)"""
-        
+
         subject = f"🎉 Milestone: {data.token_symbol} - {data.message}"
-        
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -401,7 +458,7 @@ ChainLens
         </body>
         </html>
         """
-        
+
         plain_content = f"""
 Milestone Reached!
 
@@ -417,14 +474,14 @@ View portfolio: https://chainlens.app
 ---
 ChainLens
         """
-        
+
         return self._send_email(
             to_email=data.user_email,
             subject=subject,
             html_content=html_content,
             plain_content=plain_content
         )
-    
+
     # ============================================================
     # EMAIL VERIFICATION
     # ============================================================
@@ -496,12 +553,12 @@ ChainLens - Your Multi-Chain Portfolio Tracker
     # ============================================================
     # TEST EMAIL
     # ============================================================
-    
+
     def send_test_email(self, to_email: str, user_name: str = "User") -> bool:
         """Send a test email to verify configuration"""
-        
+
         subject = "🧪 ChainLens Test Email"
-        
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -534,7 +591,7 @@ ChainLens - Your Multi-Chain Portfolio Tracker
         </body>
         </html>
         """
-        
+
         plain_content = f"""
 Test Email - ChainLens
 
@@ -547,18 +604,50 @@ Sent at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
 ---
 ChainLens
         """
-        
+
         return self._send_email(
             to_email=to_email,
             subject=subject,
             html_content=html_content,
             plain_content=plain_content
         )
-    
+
+    # ============================================================
+    # SENDGRID SENDER
+    # ============================================================
+
+    def _send_via_sendgrid(self, to_email: str, subject: str, html_content: str, plain_content: str = "") -> bool:
+        """
+        Send email using the SendGrid Python SDK.
+        Returns True on success, False on failure.
+        """
+        try:
+            message = Mail(
+                from_email=(self.from_email, self.from_name),
+                to_emails=to_email,
+                subject=subject,
+                html_content=html_content,
+                plain_text_content=plain_content or None,
+            )
+
+            sg = SendGridAPIClient(self.sendgrid_api_key)
+            response = sg.send(message)
+
+            if response.status_code in (200, 201, 202):
+                logger.info(f"[EMAIL] SendGrid sent successfully to {to_email} (status {response.status_code})")
+                return True
+            else:
+                logger.error(f"[EMAIL] SendGrid returned unexpected status {response.status_code} for {to_email}")
+                return False
+
+        except Exception as e:
+            logger.error(f"[EMAIL] SendGrid failed for {to_email}: {e}")
+            return False
+
     # ============================================================
     # INTERNAL EMAIL SENDING
     # ============================================================
-    
+
     def _send_email(
         self,
         to_email: str,
@@ -568,51 +657,58 @@ ChainLens
     ) -> bool:
         """
         Internal method to send email.
-        Uses SMTP if configured, otherwise logs to console.
+        Priority: SendGrid (if API key set) → SMTP (if configured) → Console log.
         """
-        
+
         # Log the email for debugging
         logger.info(f"[EMAIL] Sending to: {to_email}")
         logger.info(f"[EMAIL] Subject: {subject}")
-        
-        if not self.smtp_enabled:
-            # Development mode - just log
-            print("\n" + "=" * 60)
-            print(f"📧 EMAIL (Console Mode)")
-            print("=" * 60)
-            print(f"To: {to_email}")
-            print(f"Subject: {subject}")
-            print("-" * 60)
-            print(plain_content)
-            print("=" * 60 + "\n")
-            return True
-        
-        try:
-            # Create message
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = f"{self.from_name} <{self.from_email}>"
-            msg["To"] = to_email
-            
-            # Attach plain text and HTML versions
-            part1 = MIMEText(plain_content, "plain")
-            part2 = MIMEText(html_content, "html")
-            msg.attach(part1)
-            msg.attach(part2)
-            
-            # Send via SMTP
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
-                server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(self.from_email, to_email, msg.as_string())
-            
-            logger.info(f"[EMAIL] ✅ Sent successfully to {to_email}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"[EMAIL] ❌ Failed to send to {to_email}: {e}")
-            # In development, still return True so the flow continues
-            return False
+
+        # 1. Try SendGrid first if configured
+        if self.sendgrid_enabled:
+            success = self._send_via_sendgrid(to_email, subject, html_content, plain_content)
+            if success:
+                return True
+            logger.warning("[EMAIL] SendGrid failed — falling back to SMTP")
+
+        # 2. Try SMTP if configured
+        if self.smtp_enabled:
+            try:
+                # Create message
+                msg = MIMEMultipart("alternative")
+                msg["Subject"] = subject
+                msg["From"] = f"{self.from_name} <{self.from_email}>"
+                msg["To"] = to_email
+
+                # Attach plain text and HTML versions
+                part1 = MIMEText(plain_content, "plain")
+                part2 = MIMEText(html_content, "html")
+                msg.attach(part1)
+                msg.attach(part2)
+
+                # Send via SMTP
+                with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+                    server.starttls()
+                    server.login(self.smtp_user, self.smtp_password)
+                    server.sendmail(self.from_email, to_email, msg.as_string())
+
+                logger.info(f"[EMAIL] SMTP sent successfully to {to_email}")
+                return True
+
+            except Exception as e:
+                logger.error(f"[EMAIL] SMTP failed for {to_email}: {e}")
+                return False
+
+        # 3. Development/console mode — no transport configured
+        print("\n" + "=" * 60)
+        print(f"📧 EMAIL (Console Mode)")
+        print("=" * 60)
+        print(f"To: {to_email}")
+        print(f"Subject: {subject}")
+        print("-" * 60)
+        print(plain_content)
+        print("=" * 60 + "\n")
+        return True
 
 
 # ============================================================
@@ -621,17 +717,17 @@ ChainLens
 
 class EmailPreferencesService:
     """Service for managing email notification preferences"""
-    
+
     def __init__(self, preferences_collection):
         self.preferences = preferences_collection
-    
+
     def get_preferences(self, user_id: str):
         """Get user's email preferences (create defaults if not exists)"""
         from app.models.alert_models import EmailPreferencesResponse
         from datetime import datetime
-        
+
         prefs = self.preferences.find_one({"user_id": user_id})
-        
+
         if not prefs:
             # Create default preferences
             default_prefs = {
@@ -642,10 +738,10 @@ class EmailPreferencesService:
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow()
             }
-            
+
             result = self.preferences.insert_one(default_prefs)
             prefs = self.preferences.find_one({"_id": result.inserted_id})
-        
+
         return EmailPreferencesResponse(
             user_id=prefs["user_id"],
             price_alerts_enabled=prefs.get("price_alerts_enabled", True),
@@ -653,17 +749,17 @@ class EmailPreferencesService:
             weekly_summary_enabled=prefs.get("weekly_summary_enabled", True),
             updated_at=prefs.get("updated_at")
         )
-    
+
     def update_preferences(self, user_id: str, user_email: str, preferences: dict):
         """Update user's email preferences"""
         from app.models.alert_models import EmailPreferencesResponse
         from datetime import datetime
-        
+
         update_data = {
             k: v for k, v in preferences.items() if v is not None
         }
         update_data["updated_at"] = datetime.utcnow()
-        
+
         self.preferences.update_one(
             {"user_id": user_id},
             {
@@ -676,5 +772,5 @@ class EmailPreferencesService:
             },
             upsert=True
         )
-        
+
         return self.get_preferences(user_id)
